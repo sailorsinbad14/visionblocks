@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 编辑器：截图上拖框点选设热区，积木拼程序，试一下，运行（带遮罩、热键、急停） -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>VisionBlocksStudio</AssemblyName>
+    <RootNamespace>VisionBlocks.Studio</RootNamespace>
+    <Version>0.2.0</Version>
+    <!-- 应用图标和名字（图标「取景积木」，英文 VisionBlocks，中文 视搭）。
+         exe 文件名保持 VisionBlocksStudio.exe（启动脚本、测试脚本、进程识别都按它）；任务管理器里显示的是 AssemblyTitle。
+         窗口不单独设 Icon：WPF 默认沿用 exe 图标（实测 200% 缩放下标题栏 32、Alt+Tab 64 都取对应尺寸）。 -->
+    <ApplicationIcon>Assets\visionblocks.ico</ApplicationIcon>
+    <AssemblyTitle>视搭 VisionBlocks</AssemblyTitle>
+    <Product>VisionBlocks（视搭）</Product>
+    <!-- 不给 exe 打 CET（硬件影子栈）兼容标记。.NET 9 起默认打开，可「打开…」的系统文件对话框会把资源管理器插件
+         加载进本进程，其中有的插件会带进旧版 .NET Framework 运行时。旧运行时暂停线程时调用的 SetThreadContext
+         在影子栈下被系统拒绝，进程直接被结束（0xc0000409，FAST_FAIL_SET_CONTEXT_DENIED）。 -->
+    <CETCompat>false</CETCompat>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <ProjectReference Include="..\VisionBlocks.Core\VisionBlocks.Core.csproj" />
+    <ProjectReference Include="..\VisionBlocks.Overlay\VisionBlocks.Overlay.csproj" />
+    <!-- 2026-11-22：靶子做进编辑器的 exe（Program.Main 里 bench-target 参数的分支），单个 exe 发布时也能「启动靶子」 -->
+    <ProjectReference Include="..\BenchTarget\BenchTarget.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 示例程序（巡逻、背包）内嵌进 exe，打包后第一次启动释放到 programs\示例\。只带程序和模板，不带参考截图 -->
+    <EmbeddedResource Include="..\..\programs\t1\patrol.vbp.json;..\..\programs\t1\templates\*.png" LogicalName="samples/t1/$([System.String]::Copy('%(RelativeDir)').Replace('..\..\programs\t1\', '').Replace('\', '/'))%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\programs\inv1\inventory.vbp.json;..\..\programs\inv1\templates\*.png" LogicalName="samples/inv1/$([System.String]::Copy('%(RelativeDir)').Replace('..\..\programs\inv1\', '').Replace('\', '/'))%(Filename)%(Extension)" />
+    <!-- 结果格式说明随 exe 发布，启动时放到 results\ 旁边，外部程序在 latest.json 边上就能找到。
+         文件名里的 .zh / .en 会被当成语言、拆进 zh\、en\ 卫星程序集，所以要标 WithCulture="false" -->
+    <EmbeddedResource Include="..\..\docs\results-format.zh.md" LogicalName="docs/结果格式说明.md" WithCulture="false" />
+    <EmbeddedResource Include="..\..\docs\results-format.en.md" LogicalName="docs/results-format.en.md" WithCulture="false" />
+  </ItemGroup>
+  <!-- OpenCvSharp 运行时包带的 ffmpeg 视频库（28 MB）用不到：发布时去掉 -->
+  <Target Name="DropUnusedOpenCvNatives" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="$([System.String]::Copy('%(Filename)').StartsWith('opencv_videoio_ffmpeg'))" />
+    </ItemGroup>
+  </Target>
+</Project>

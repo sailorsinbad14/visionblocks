@@ -1,0 +1,265 @@
+using System.Text.Json.Serialization;
+
+namespace VisionBlocks.Core.Model;
+
+/// <summary>
+/// 程序文件（.vbp.json）。按「识别对象声明化」的思路：
+/// 热区、定点、模板、颜色都是有名字的数据，积木只按名字引用它们。
+/// 所有坐标都是「客户区基准坐标」（Base，默认 1920×1080），和窗口在哪块屏、缩放多少无关。
+/// </summary>
+public sealed class VbProgram
+{
+    public int Version { get; set; } = 1;
+    public string Name { get; set; } = "未命名";
+    public BaseSize Base { get; set; } = new();
+    public TargetSpec Target { get; set; } = new();
+    public Dictionary<string, RegionDef> Regions { get; set; } = new();
+    public Dictionary<string, PointDef> Points { get; set; } = new();
+    public Dictionary<string, TemplateDef> Templates { get; set; } = new();
+    public Dictionary<string, ColorDef> Colors { get; set; } = new();
+    public Dictionary<string, GridDef> Grids { get; set; } = new();
+    public List<Block> Program { get; set; } = new();
+
+    /// <summary>保留的热区名：「对每一格」循环里的当前格子。点击、条件、读文字、存图都可以用它。</summary>
+    public const string CurrentCell = "当前格";
+}
+
+/// <summary>
+/// 网格（2026-11-20，背包场景）：第一格的位置和大小，加上列数、行数、间距，就能算出每一格。
+/// 一列多行可以当分类列表用；按整行滚动的物品列表，滚完以后格子位置不变，也能用。
+/// </summary>
+public sealed class GridDef
+{
+    public string Label { get; set; } = "";
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int W { get; set; } = 100;
+    public int H { get; set; } = 100;
+    public int Cols { get; set; } = 4;
+    public int Rows { get; set; } = 3;
+    public int GapX { get; set; } = 10;
+    public int GapY { get; set; } = 10;
+
+    /// <summary>第 i 格（先行后列，从 0 开始）的基准坐标。</summary>
+    public RegionDef Cell(int i) => new() { X = X + i % Cols * (W + GapX), Y = Y + i / Cols * (H + GapY), W = W, H = H };
+    public override string ToString() => $"{Cols}×{Rows} 格，每格 {W}×{H}，间距 {GapX}/{GapY}";
+}
+
+public sealed class BaseSize { public int W { get; set; } = 1920; public int H { get; set; } = 1080; }
+
+public sealed class TargetSpec
+{
+    /// <summary>只允许向这些进程名的窗口发输入（白名单）。</summary>
+    public List<string> AllowedProcesses { get; set; } = new() { "BenchTarget" };
+    /// <summary>发键前把目标窗口的输入法切到英文（中文输入法会截走字母键，见 ImeGuard）。</summary>
+    public bool CloseImeBeforeKeys { get; set; } = true;
+}
+
+public sealed class RegionDef
+{
+    public string Label { get; set; } = "";
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int W { get; set; }
+    public int H { get; set; }
+    public override string ToString() => $"x{X} y{Y} w{W} h{H}";
+}
+
+public sealed class PointDef
+{
+    public string Label { get; set; } = "";
+    public int X { get; set; }
+    public int Y { get; set; }
+}
+
+public sealed class TemplateDef
+{
+    public string Label { get; set; } = "";
+    /// <summary>相对程序文件所在目录的 PNG 路径，按基准分辨率裁出。</summary>
+    public string File { get; set; } = "";
+}
+
+/// <summary>HSV 范围（OpenCV 口径：H 0–179，S/V 0–255）。Lower.H &gt; Upper.H 表示色相跨过 0（红色）。</summary>
+public sealed class ColorDef
+{
+    public string Label { get; set; } = "";
+    public int[] Lower { get; set; } = new int[3];
+    public int[] Upper { get; set; } = new int[3];
+}
+
+// ───────────── 积木 ─────────────
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(RepeatUntilBlock), "repeatUntil")]
+[JsonDerivedType(typeof(RepeatBlock), "repeat")]
+[JsonDerivedType(typeof(IfBlock), "if")]
+[JsonDerivedType(typeof(WaitUntilBlock), "waitUntil")]
+[JsonDerivedType(typeof(WaitBlock), "wait")]
+[JsonDerivedType(typeof(KeyBlock), "key")]
+[JsonDerivedType(typeof(ClickBlock), "click")]
+[JsonDerivedType(typeof(TypeTextBlock), "typeText")]
+[JsonDerivedType(typeof(StopBlock), "stop")]
+[JsonDerivedType(typeof(ForEachCellBlock), "forEachCell")]
+[JsonDerivedType(typeof(UntilNoNewRowsBlock), "untilNoNewRows")]
+[JsonDerivedType(typeof(WheelBlock), "wheel")]
+[JsonDerivedType(typeof(ReadTextBlock), "readText")]
+[JsonDerivedType(typeof(SaveImageBlock), "saveImage")]
+[JsonDerivedType(typeof(RecordRowBlock), "recordRow")]
+public abstract class Block
+{
+    public string? Note { get; set; }
+}
+
+public interface IContainerBlock { List<Block> Body { get; } }
+
+public sealed class RepeatUntilBlock : Block, IContainerBlock
+{
+    public Condition Until { get; set; } = new TextCondition();
+    /// <summary>多久检查一次「直到」条件。OCR 这类慢识别不该每一圈都跑，否则拖慢整个循环。</summary>
+    public int CheckEveryMs { get; set; } = 0;
+    /// <summary>整个循环的超时，0 = 不限。</summary>
+    public int TimeoutMs { get; set; } = 0;
+    public List<Block> Body { get; set; } = new();
+}
+
+public sealed class RepeatBlock : Block, IContainerBlock
+{
+    public int Times { get; set; } = 3;
+    public List<Block> Body { get; set; } = new();
+}
+
+public sealed class IfBlock : Block, IContainerBlock
+{
+    public Condition Cond { get; set; } = new ImageCondition();
+    public List<Block> Body { get; set; } = new();
+    public List<Block> Else { get; set; } = new();
+}
+
+public sealed class WaitUntilBlock : Block
+{
+    public Condition Cond { get; set; } = new ImageCondition();
+    public int TimeoutMs { get; set; } = 3000;
+}
+
+public sealed class WaitBlock : Block { public int Ms { get; set; } = 100; }
+
+public sealed class KeyBlock : Block
+{
+    public string Key { get; set; } = "F";
+    /// <summary>按下到抬起的间隔，一般 30–60ms。</summary>
+    public int HoldMs { get; set; } = 40;
+}
+
+public enum ConfirmMode { None, PixelChange, Condition }
+
+public sealed class ClickBlock : Block
+{
+    /// <summary>点哪里：定点名，或热区名（点热区中心）。</summary>
+    public string? Point { get; set; }
+    public string? Region { get; set; }
+    public int HoldMs { get; set; } = 40;
+    /// <summary>
+    /// 点完截图确认（不要连续盲点固定坐标）。
+    /// PixelChange：点击处周围画面有变化；Condition：等到 ConfirmCond 成立。
+    /// </summary>
+    public ConfirmMode Confirm { get; set; } = ConfirmMode.PixelChange;
+    public Condition? ConfirmCond { get; set; }
+    public int ConfirmTimeoutMs { get; set; } = 800;
+}
+
+public sealed class TypeTextBlock : Block { public string Text { get; set; } = ""; }
+
+public sealed class StopBlock : Block { }
+
+// ───────────── 背包场景用的积木（2026-11-20） ─────────────
+
+/// <summary>对网格里的每一格（先行后列）执行一遍；循环体里的「当前格」就是这一格。</summary>
+public sealed class ForEachCellBlock : Block, IContainerBlock
+{
+    public string Grid { get; set; } = "";
+    public List<Block> Body { get; set; } = new();
+}
+
+/// <summary>
+/// 反复执行循环体，直到某一遍没有记下任何新的一行（用来翻页：翻到底以后再看一遍全是重复的，就停）。
+/// MaxTimes 是硬上限，防止去重失效时永远翻下去。
+/// </summary>
+public sealed class UntilNoNewRowsBlock : Block, IContainerBlock
+{
+    public int MaxTimes { get; set; } = 30;
+    public List<Block> Body { get; set; } = new();
+}
+
+/// <summary>把鼠标移到定点或热区中心，滚动滚轮。Notches 为正向下滚，为负向上滚；一格 = WHEEL_DELTA 120。</summary>
+public sealed class WheelBlock : Block
+{
+    public string? Point { get; set; }
+    public string? Region { get; set; }
+    public int Notches { get; set; } = 1;
+}
+
+/// <summary>识别热区里的文字，存进当前这一行的某个字段。</summary>
+public sealed class ReadTextBlock : Block
+{
+    public string Region { get; set; } = "";
+    public string Field { get; set; } = "";
+    /// <summary>只保留数字（「库存 23」→「23」）。</summary>
+    public bool NumbersOnly { get; set; }
+}
+
+/// <summary>把热区截下来存成 PNG，文件路径存进当前这一行的某个字段。</summary>
+public sealed class SaveImageBlock : Block
+{
+    public string Region { get; set; } = "";
+    public string Field { get; set; } = "";
+}
+
+/// <summary>
+/// 把当前各字段的值写成结果表（data.csv）的一行。字段的值在写完后保留，下一次读到新值时覆盖（这样「分类」读一次就能跟着后面每一行）。
+/// DedupeBy 里列出的字段组合已经写过时跳过这一行，不算新记录。
+/// </summary>
+public sealed class RecordRowBlock : Block
+{
+    public List<string> DedupeBy { get; set; } = new();
+}
+
+// ───────────── 条件 ─────────────
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(ImageCondition), "image")]
+[JsonDerivedType(typeof(ColorCondition), "color")]
+[JsonDerivedType(typeof(TextCondition), "text")]
+public abstract class Condition
+{
+    /// <summary>取反：「看不到」「不包含」。</summary>
+    public bool Negate { get; set; }
+}
+
+public sealed class ImageCondition : Condition
+{
+    public string Template { get; set; } = "";
+    public string Region { get; set; } = "";
+    /// <summary>灰度 TM_CCOEFF_NORMED 的得分阈值，一般从 0.8 起步。</summary>
+    public double Threshold { get; set; } = 0.8;
+    /// <summary>
+    /// 对比度下限（匹配处灰度标准差 / 模板灰度标准差）。0 = 不检查。
+    /// 用来挡住「半透明」「变暗」的同形干扰项：TM_CCOEFF_NORMED 对亮度和对比度的线性变化不敏感。
+    /// </summary>
+    public double MinContrast { get; set; } = 0;
+}
+
+public sealed class ColorCondition : Condition
+{
+    public string Color { get; set; } = "";
+    public string Region { get; set; } = "";
+    /// <summary>"&gt;" 或 "&lt;"。</summary>
+    public string Op { get; set; } = ">";
+    /// <summary>落在颜色范围内的像素占热区的比例（0–1）。用占比，不用单点。</summary>
+    public double Ratio { get; set; } = 0.05;
+}
+
+public sealed class TextCondition : Condition
+{
+    public string Region { get; set; } = "";
+    public string Contains { get; set; } = "";
+}

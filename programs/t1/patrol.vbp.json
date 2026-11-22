@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "name": "示例：巡逻小游戏",
+  "base": {
+    "w": 1920,
+    "h": 1080
+  },
+  "target": {
+    "allowedProcesses": [
+      "BenchTarget"
+    ],
+    "closeImeBeforeKeys": true
+  },
+  "regions": {
+    "keyZone": {
+      "label": "F 图标区",
+      "x": 40,
+      "y": 64,
+      "w": 900,
+      "h": 576
+    },
+    "hpBar": {
+      "label": "血条",
+      "x": 1010,
+      "y": 130,
+      "w": 840,
+      "h": 48
+    },
+    "score": {
+      "label": "计分",
+      "x": 40,
+      "y": 664,
+      "w": 900,
+      "h": 150
+    }
+  },
+  "points": {
+    "potion": {
+      "label": "喝药按钮",
+      "x": 1120,
+      "y": 272
+    }
+  },
+  "templates": {
+    "fKey": {
+      "label": "F键帽（只裁字母）",
+      "file": "templates/fGlyph.png"
+    }
+  },
+  "colors": {
+    "red": {
+      "label": "红",
+      "lower": [
+        170,
+        114,
+        146
+      ],
+      "upper": [
+        10,
+        254,
+        255
+      ]
+    }
+  },
+  "grids": {},
+  "program": [
+    {
+      "type": "repeatUntil",
+      "until": {
+        "type": "text",
+        "region": "score",
+        "contains": "完成",
+        "negate": false
+      },
+      "checkEveryMs": 1000,
+      "timeoutMs": 180000,
+      "body": [
+        {
+          "type": "if",
+          "cond": {
+            "type": "image",
+            "template": "fKey",
+            "region": "keyZone",
+            "threshold": 0.95,
+            "minContrast": 0.6,
+            "negate": false
+          },
+          "body": [
+            {
+              "type": "key",
+              "key": "F",
+              "holdMs": 40
+            },
+            {
+              "type": "waitUntil",
+              "cond": {
+                "type": "image",
+                "template": "fKey",
+                "region": "keyZone",
+                "threshold": 0.95,
+                "minContrast": 0.6,
+                "negate": true
+              },
+              "timeoutMs": 1000
+            }
+          ],
+          "else": []
+        },
+        {
+          "type": "if",
+          "cond": {
+            "type": "color",
+            "color": "red",
+            "region": "hpBar",
+            "op": ">",
+            "ratio": 0.02,
+            "negate": false
+          },
+          "body": [
+            {
+              "type": "click",
+              "point": "potion",
+              "holdMs": 40,
+              "confirm": "condition",
+              "confirmCond": {
+                "type": "color",
+                "color": "red",
+                "region": "hpBar",
+                "op": "<",
+                "ratio": 0.01,
+                "negate": false
+              },
+              "confirmTimeoutMs": 800
+            }
+          ],
+          "else": []
+        },
+        {
+          "type": "wait",
+          "ms": 15
+        }
+      ],
+      "note": "计分到 20 时靶子显示「完成」。OCR 慢，每秒只查一次"
+    }
+  ]
+}

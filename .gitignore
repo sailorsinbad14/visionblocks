@@ -1,0 +1,23 @@
+# 编译输出 / build output
+bin/
+obj/
+out/
+*.user
+.vs/
+
+# 本机运行产生的 / produced by running locally
+results/
+studio-settings.json
+programs/*
+!programs/t1/
+!programs/inv1/
+
+# 只在开发机上用的启动脚本（仓库里用 start-editor.cmd）/ local launchers
+start-old-editor.cmd
+启动编辑器.cmd
+tools/swap-editor.ps1
+
+# 缓存 / caches
+.nuget/
+.dotnet-home/
+__pycache__/

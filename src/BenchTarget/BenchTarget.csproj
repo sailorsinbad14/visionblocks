@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 靶子程序：安全的练习对象，不含任何游戏素材，画面全部由代码生成 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>BenchTarget</AssemblyName>
+    <RootNamespace>BenchTarget</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 调试遮罩：透明、点击穿透、置顶、不抢焦点 -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>VisionBlocks.Overlay</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VisionBlocks.Core\VisionBlocks.Core.csproj" />
+  </ItemGroup>
+</Project>

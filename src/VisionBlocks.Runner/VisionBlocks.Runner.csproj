@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 命令行运行器：不开编辑器也能跑程序；probe 子命令做截图和输入的探针 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>vbrun</AssemblyName>
+    <RootNamespace>VisionBlocks.Runner</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <ProjectReference Include="..\VisionBlocks.Core\VisionBlocks.Core.csproj" />
+    <ProjectReference Include="..\VisionBlocks.Overlay\VisionBlocks.Overlay.csproj" />
+  </ItemGroup>
+</Project>

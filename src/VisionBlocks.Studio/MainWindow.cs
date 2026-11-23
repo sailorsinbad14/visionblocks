@@ -60,6 +60,12 @@ public sealed partial class MainWindow : Window
     private StudioRun? _run;
     private object? _selected;
     private Point _dragStart;
+    // 2026-11-23：复制粘贴、程序树里拖动
+    private BlockClip? _clip;
+    private Point _treeDragStart;
+    private Block? _treeDragBlock;
+    private readonly Canvas _dropLayer = new() { IsHitTestVisible = false };
+    private ScrollViewer? _treeSv;
 
     // 改版新增
     private readonly ResourceDictionary _theme = Ui.Theme;
@@ -306,6 +312,8 @@ public sealed partial class MainWindow : Window
             IconBtn("open", "btnOpen", OpenProgram, "btnOpen", compactHide: true),
             IconBtn("save", "btnSave", () => { _ed.Save(); UpdateTitle(); Log("已保存"); }, "btnSave", compactHide: true),
             IconBtn("sample", "btnSample", () => LoadProgram(AppPaths.SamplePatrol), "btnSample", compactHide: true),
+            IconBtn("undo", "btnUndo", UndoEdit, "btnUndo", compactHide: true),
+            IconBtn("redo", "btnRedo", RedoEdit, "btnRedo", compactHide: true),
         })
         { b.Margin = new Thickness(0, 0, 6, 0); files.Children.Add(b); }
         Add(files, 2);
@@ -548,8 +556,10 @@ public sealed partial class MainWindow : Window
         var moves = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         foreach (var b in new[]
         {
-            IconBtn("up", "btnUp", () => WithSelectedBlock(b => _ed.Move(b, -1)), "btnUp", compactHide: true),
-            IconBtn("down", "btnDown", () => WithSelectedBlock(b => _ed.Move(b, 1)), "btnDown", compactHide: true),
+            IconBtn("copy", "btnCopy", CopySelected, "btnCopy", compactHide: true),
+            IconBtn("paste", "btnPaste", PasteAtSelection, "btnPaste", compactHide: true),
+            IconBtn("up", "btnUp", () => WithSelectedBlock(b => { if (!_ed.MoveUp(b)) Log("已经在最上面了"); }), "btnUp", compactHide: true),
+            IconBtn("down", "btnDown", () => WithSelectedBlock(b => { if (!_ed.MoveDown(b)) Log("已经在最下面了"); }), "btnDown", compactHide: true),
             IconBtn("indent", "btnIndent", () => WithSelectedBlock(b => { if (!_ed.Indent(b)) Log("上面一块不是「重复/如果」，没法缩进进去"); }), "btnIndent", compactHide: true),
             IconBtn("outdent", "btnOutdent", () => WithSelectedBlock(b => _ed.Outdent(b)), "btnOutdent", compactHide: true),
             IconBtn("trash", "btnDelete", () => WithSelectedBlock(b => { _ed.Remove(b); _selected = null; }), "btnDelete", compactHide: true),
@@ -570,13 +580,23 @@ public sealed partial class MainWindow : Window
         _tree.PreviewMouseLeftButtonUp += (_, _) => SyncTreeSelection();
         _tree.GotKeyboardFocus += (_, _) => SyncTreeSelection();
         _tree.Drop += OnTreeDrop;
-        _tree.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent("vb-block") ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
+        _tree.DragOver += OnTreeDragOver;
+        _tree.DragLeave += (_, _) => ClearDropHint();
+        // 2026-11-23：树里的积木可以拖（按住 Ctrl 松开 = 复制一份过去）；右键菜单；右键先选中鼠标下那一块
+        _tree.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            _treeDragStart = e.GetPosition(_tree);
+            _treeDragBlock = ItemUnder(e.OriginalSource)?.Tag as Block;
+        };
+        _tree.PreviewMouseMove += OnTreeMouseMove;
+        _tree.PreviewMouseRightButtonDown += (_, e) => { if (ItemUnder(e.OriginalSource) is { } it) { it.IsSelected = true; it.Focus(); } };
+        _tree.ContextMenu = BuildTreeMenu();
 
         var body = new Grid();
         body.ColumnDefinitions.Add(_shelfCol = new ColumnDefinition { Width = new GridLength(196) });
         body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         body.Children.Add(BuildPalette());
-        var treeHost = new Border { CornerRadius = new CornerRadius(0, 0, 16, 0), ClipToBounds = true, Child = _tree };
+        var treeHost = new Border { CornerRadius = new CornerRadius(0, 0, 16, 0), ClipToBounds = true, Child = new Grid { Children = { _tree, _dropLayer } } };
         Grid.SetColumn(treeHost, 1);
         body.Children.Add(treeHost);
 
@@ -794,6 +814,8 @@ public sealed partial class MainWindow : Window
     private void RebuildTree()
     {
         var sel = _selected;
+        _treeSv ??= FindChild<ScrollViewer>(_tree);
+        double keep = _treeSv?.VerticalOffset ?? 0;   // 重建会让树跳回顶部：先记下滚动位置，重建完放回去（2026-11-23）
         _tree.Items.Clear();
         TreeViewItem? toSelect = null;
         TreeViewItem Node(Block b)
@@ -815,7 +837,24 @@ public sealed partial class MainWindow : Window
         foreach (var b in _ed.Program.Program) _tree.Items.Add(Node(b));
         if (_ed.Program.Program.Count == 0)
             _tree.Items.Add(new TreeViewItem { Header = new TextBlock { Text = L.T("emptyProgram"), Foreground = R("Text3"), TextWrapping = TextWrapping.Wrap }, IsEnabled = false });
-        if (toSelect != null) { toSelect.IsSelected = true; toSelect.BringIntoView(); }
+        if (toSelect != null) toSelect.IsSelected = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            _treeSv ??= FindChild<ScrollViewer>(_tree);
+            _treeSv?.ScrollToVerticalOffset(keep);
+            toSelect?.BringIntoView();
+        });
+    }
+
+    private static T? FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var ch = VisualTreeHelper.GetChild(root, i);
+            if (ch is T t) return t;
+            if (FindChild<T>(ch) is { } d) return d;
+        }
+        return null;
     }
 
     private static Brush CategoryBrush(Block b) => BlockText.CategoryOf(b) switch { BlockText.Category.Flow => Ui.FlowFg, BlockText.Category.Sense => Ui.SenseFg, _ => Ui.ActFg };
@@ -881,6 +920,13 @@ public sealed partial class MainWindow : Window
     {
         var nb = MakeBlock(type);
         if (nb == null) return;
+        InsertBlock(nb, anchor);
+        if (_ed.Program.Regions.Count == 0) Log("提示：还没有热区。先在画布上「拖框建热区」，再回来设置这块积木。");
+    }
+
+    /// <summary>插入规则（积木架点击、粘贴共用）：选中普通积木 → 放在它后面；选中容器 → 放进它末尾；选中「否则」→ 放进否则分支；没选 → 程序末尾。</summary>
+    private void InsertBlock(Block nb, object? anchor)
+    {
         switch (anchor)
         {
             case ElseMarker em: _ed.Insert(nb, em.Owner, intoElse: true); break;
@@ -890,16 +936,262 @@ public sealed partial class MainWindow : Window
         }
         _selected = nb;
         RefreshAll();
-        if (_ed.Program.Regions.Count == 0) Log("提示：还没有热区。先在画布上「拖框建热区」，再回来设置这块积木。");
+        WarnCurrentCell();
+    }
+
+    // ───────────────────────── 复制、粘贴、撤销（2026-11-23） ─────────────────────────
+
+    private void CopySelected() => WithSelectedBlock(b =>
+    {
+        _clip = BlockClip.Capture(_ed, b);
+        Log($"已复制：{_clip.Summary}");
+    });
+
+    private void CutSelected() => WithSelectedBlock(b =>
+    {
+        _clip = BlockClip.Capture(_ed, b);
+        _ed.Remove(b);
+        _selected = null;
+        Log($"已剪切：{_clip.Summary}（粘贴放回去，撤销也能恢复）");
+    });
+
+    private void PasteAtSelection()
+    {
+        if (_clip == null) { Log("剪贴板是空的：先选中一块积木点「复制」"); return; }
+        var (nb, notes) = _clip.Paste(_ed);
+        InsertBlock(nb, _selected is ResourceRef ? null : _selected);
+        Log($"已粘贴：{BlockText.Summary(nb, _ed.Program)}");
+        foreach (var n in notes) Log("  " + n);
+        if (notes.Count > 0) RebuildResources();
+    }
+
+    private void DuplicateSelected() => WithSelectedBlock(b =>
+    {
+        var nb = ProgramEditor.Clone(b);
+        var loc = _ed.Locate(b)!.Value;
+        _ed.InsertAt(nb, loc.List, loc.Index + 1);
+        _selected = nb;
+        WarnCurrentCell();
+    });
+
+    private void UndoEdit() => History(_ed.Undo, "没有可以撤销的了", "已撤销");
+    private void RedoEdit() => History(_ed.Redo, "没有可以重做的了", "已重做");
+
+    /// <summary>撤销 / 重做以后程序是新对象：按原来的位置找回选中的积木，资源按名字找回。</summary>
+    private void History(Func<bool> op, string none, string done)
+    {
+        var path = _selected switch { Block b => _ed.PathOf(b), ElseMarker em => _ed.PathOf(em.Owner), _ => null };
+        bool wasElse = _selected is ElseMarker;
+        var res = _selected as ResourceRef;
+        if (!op()) { Log(none); return; }
+        _selected = path != null && _ed.BlockAt(path) is { } nb ? (wasElse && nb is IfBlock ib ? new ElseMarker(ib) : nb)
+            : res != null && ResourceExists(res) ? res : null;
+        RefreshAll();
+        Log(done);
+    }
+
+    private bool ResourceExists(ResourceRef r) => r.Kind switch
+    {
+        "region" => _ed.Program.Regions.ContainsKey(r.Name), "point" => _ed.Program.Points.ContainsKey(r.Name),
+        "template" => _ed.Program.Templates.ContainsKey(r.Name), "color" => _ed.Program.Colors.ContainsKey(r.Name),
+        "grid" => _ed.Program.Grids.ContainsKey(r.Name), _ => false
+    };
+
+    /// <summary>「当前格」被挪到「对每一格」外面时马上提醒（以前要到运行时才报）。</summary>
+    private void WarnCurrentCell()
+    {
+        foreach (var e in ProgramIO.Validate(_ed.Program).Where(x => x.Contains(VbProgram.CurrentCell)))
+            Log("⚠ " + e);
+    }
+
+    private ContextMenu BuildTreeMenu()
+    {
+        var m = new ContextMenu();
+        void Item(string key, Action act, string aid, Brush? fg = null)
+        {
+            var mi = new MenuItem();
+            L.Reg(mi, HeaderedItemsControl.HeaderProperty, key);
+            AutomationProperties.SetAutomationId(mi, aid);
+            if (fg != null) mi.Foreground = fg;
+            mi.Click += (_, _) => act();
+            m.Items.Add(mi);
+        }
+        Item("btnCopy", CopySelected, "ctxCopy");
+        Item("btnCut", CutSelected, "ctxCut");
+        Item("btnPaste", PasteAtSelection, "ctxPaste");
+        Item("btnDuplicate", DuplicateSelected, "ctxDuplicate");
+        m.Items.Add(new Separator());
+        Item("btnDelete", () => WithSelectedBlock(b => { _ed.Remove(b); _selected = null; }), "ctxDelete", Ui.Bad);
+        return m;
+    }
+
+    // ───────────────────────── 程序树里拖动（2026-11-23） ─────────────────────────
+
+    private static TreeViewItem? ItemUnder(object? src)
+    {
+        var dep = src as DependencyObject;
+        while (dep != null && dep is not TreeViewItem) dep = dep is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(dep) : LogicalTreeHelper.GetParent(dep);
+        return dep as TreeViewItem;
+    }
+
+    private void OnTreeMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _treeDragBlock == null) return;
+        var d = e.GetPosition(_tree) - _treeDragStart;
+        if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var b = _treeDragBlock;
+        _treeDragBlock = null;
+        try { DragDrop.DoDragDrop(_tree, new DataObject("vb-move", b), DragDropEffects.Move | DragDropEffects.Copy); }
+        finally { ClearDropHint(); }
+    }
+
+    private static FrameworkElement? HeaderOf(TreeViewItem it) => it.Template?.FindName("PART_Header", it) as FrameworkElement;
+
+    /// <summary>
+    /// 鼠标在树上的位置 → 落点。积木的上半 = 放在它上面；下半 = 放在它下面，容器的下半 = 放进去当第一块；
+    /// 容器的底盖 = 放到容器后面（出作用域）；「否则」行 = 否则分支第一块；空容器的空槽 = 放进去；空白处 = 程序末尾。
+    /// 返回落点和画指示线用的位置（相对 _dropLayer）。
+    /// </summary>
+    private (List<Block> List, int Index, Point LineFrom, double LineW)? DropAt(DragEventArgs e)
+    {
+        var item = ItemUnder(e.OriginalSource);
+        Point Pt(FrameworkElement el, double x, double y) => el.TranslatePoint(new Point(x, y), _dropLayer);
+        if (item == null)
+        {
+            var last = _tree.Items.OfType<TreeViewItem>().LastOrDefault(i => i.Tag is Block);
+            var at = last != null ? Pt(last, 0, last.ActualHeight - 4) : new Point(16, 14);
+            return (_ed.Program.Program, _ed.Program.Program.Count, at, 220);
+        }
+        var header = HeaderOf(item);
+        if (header == null) return null;
+        var p = e.GetPosition(header);
+        double hh = header.ActualHeight;
+        (List<Block>, int, Point, double)? Slot(Block? anchor, ProgramEditor.DropZone z, Point line, double w)
+            => _ed.Slot(anchor, z) is { } s ? (s.List, s.Index, line, w) : null;
+        double W(FrameworkElement h) => Math.Max(160, Math.Min(h.ActualWidth, 420));
+        switch (item.Tag)
+        {
+            case ElseMarker em:
+                if (p.Y <= hh) return Slot(em.Owner, ProgramEditor.DropZone.ElseFirst, Pt(header, 30, hh + 4), W(header));
+                return ChildGap(item, em.Owner.Else, p, header) ?? Slot(em.Owner, ProgramEditor.DropZone.ElseEnd, Pt(header, 30, hh + 4), W(header));
+            case Block b:
+                bool container = b is IContainerBlock;
+                if (p.Y < hh / 2) return Slot(b, ProgramEditor.DropZone.Before, Pt(header, 0, -4), W(header));
+                if (p.Y <= hh) return container ? Slot(b, ProgramEditor.DropZone.IntoFirst, Pt(header, 30, hh + 4), W(header)) : Slot(b, ProgramEditor.DropZone.After, Pt(header, 0, hh + 4), W(header));
+                if (!container) return Slot(b, ProgramEditor.DropZone.After, Pt(header, 0, hh + 4), W(header));
+                // 容器的身子里但不在某个子积木上：底盖（最下面 21 DIP）= 出到后面；空槽 = 放进去；两块之间的缝 = 放在上面那块后面
+                double py = e.GetPosition(item).Y;
+                if (py >= item.ActualHeight - 21) return Slot(b, ProgramEditor.DropZone.After, Pt(item, 0, item.ActualHeight - 4), W(header));
+                var body = ((IContainerBlock)b).Body;
+                return ChildGap(item, body, p, header) ?? Slot(b, ProgramEditor.DropZone.IntoFirst, Pt(header, 30, hh + 4), W(header));
+        }
+        return null;
+    }
+
+    /// <summary>容器身子里两块之间的缝：放在缝上面那块的后面。</summary>
+    private (List<Block>, int, Point, double)? ChildGap(TreeViewItem parent, List<Block> list, Point pInHeader, FrameworkElement parentHeader)
+    {
+        TreeViewItem? above = null;
+        foreach (var ch in parent.Items.OfType<TreeViewItem>())
+        {
+            if (ch.Tag is not Block) continue;
+            var top = ch.TranslatePoint(new Point(0, 0), parentHeader);
+            if (top.Y <= pInHeader.Y) above = ch;
+        }
+        if (above?.Tag is not Block ab || _ed.Locate(ab) is not { } loc || !ReferenceEquals(loc.List, list)) return null;
+        var h = HeaderOf(above) ?? above;
+        var line = above.TranslatePoint(new Point(0, above.ActualHeight - 4), _dropLayer);
+        return (list, loc.Index + 1, line, Math.Max(160, Math.Min(h.ActualWidth, 420)));
+    }
+
+    private void OnTreeDragOver(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        bool move = e.Data.GetDataPresent("vb-move"), add = e.Data.GetDataPresent("vb-block");
+        if (!move && !add) { e.Effects = DragDropEffects.None; return; }
+        // 靠近上下边时自动滚动
+        _treeSv ??= FindChild<ScrollViewer>(_tree);
+        double y = e.GetPosition(_tree).Y;
+        if (_treeSv != null) { if (y < 28) _treeSv.LineUp(); else if (y > _tree.ActualHeight - 28) _treeSv.LineDown(); }
+        var drop = DropAt(e);
+        bool copy = move && e.KeyStates.HasFlag(DragDropKeyStates.ControlKey);
+        bool ok = drop != null && !(move && !copy && e.Data.GetData("vb-move") is Block src && ProgramEditor.Contains(src, drop.Value.List));
+        e.Effects = !ok ? DragDropEffects.None : move && !copy ? DragDropEffects.Move : DragDropEffects.Copy;
+        ShowDropHint(drop, ok);
     }
 
     private void OnTreeDrop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData("vb-block") is not string type) return;
-        var dep = e.OriginalSource as DependencyObject;
-        while (dep != null && dep is not TreeViewItem) dep = VisualTreeHelper.GetParent(dep);
-        InsertAt(type, (dep as TreeViewItem)?.Tag);
         e.Handled = true;
+        var drop = DropAt(e);
+        ClearDropHint();
+        if (drop is not { } d) return;
+        if (e.Data.GetData("vb-block") is string type)
+        {
+            if (MakeBlock(type) is not { } nb) return;
+            _ed.InsertAt(nb, d.List, d.Index);
+            _selected = nb;
+        }
+        else if (e.Data.GetData("vb-move") is Block b)
+        {
+            if (e.KeyStates.HasFlag(DragDropKeyStates.ControlKey))
+            {
+                var nb = ProgramEditor.Clone(b);
+                _ed.InsertAt(nb, d.List, d.Index);
+                _selected = nb;
+            }
+            else if (ProgramEditor.Contains(b, d.List)) { Log("不能把积木拖进它自己里面"); return; }
+            else if (!_ed.MoveTo(b, d.List, d.Index)) return;
+            else _selected = b;
+        }
+        else return;
+        RefreshAll();
+        WarnCurrentCell();
+    }
+
+    /// <summary>落点指示：一条横线（不合法时红色），以及要放进去的那个容器的虚线框。</summary>
+    private void ShowDropHint((List<Block> List, int Index, Point LineFrom, double LineW)? drop, bool ok)
+    {
+        _dropLayer.Children.Clear();
+        if (drop is not { } d) return;
+        var brush = ok ? R("Ink") : Ui.Bad;
+        var line = new System.Windows.Shapes.Rectangle { Width = d.LineW, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = brush };
+        Canvas.SetLeft(line, d.LineFrom.X);
+        Canvas.SetTop(line, d.LineFrom.Y - 1.5);
+        _dropLayer.Children.Add(line);
+        var dot = new System.Windows.Shapes.Ellipse { Width = 9, Height = 9, Fill = brush };
+        Canvas.SetLeft(dot, d.LineFrom.X - 4);
+        Canvas.SetTop(dot, d.LineFrom.Y - 4.5);
+        _dropLayer.Children.Add(dot);
+        if (_ed.OwnerOf(d.List) is { } own && FindItem(own.Owner) is { } oi)
+        {
+            var tl = oi.TranslatePoint(new Point(-6, -6), _dropLayer);
+            var frame = new System.Windows.Shapes.Rectangle
+            {
+                Width = Math.Max(40, oi.ActualWidth + 8), Height = Math.Max(20, oi.ActualHeight + 4), Stroke = brush, StrokeThickness = 2,
+                StrokeDashArray = new DoubleCollection { 3, 2 }, RadiusX = 12, RadiusY = 12
+            };
+            Canvas.SetLeft(frame, tl.X);
+            Canvas.SetTop(frame, tl.Y);
+            _dropLayer.Children.Add(frame);
+        }
+    }
+
+    private void ClearDropHint() => _dropLayer.Children.Clear();
+
+    private TreeViewItem? FindItem(Block b)
+    {
+        TreeViewItem? Walk(ItemCollection items)
+        {
+            foreach (var o in items)
+            {
+                if (o is not TreeViewItem it) continue;
+                if (ReferenceEquals(it.Tag, b)) return it;
+                if (Walk(it.Items) is { } f) return f;
+            }
+            return null;
+        }
+        return Walk(_tree.Items);
     }
 
     // ───────────────────────── 程序文件 ─────────────────────────

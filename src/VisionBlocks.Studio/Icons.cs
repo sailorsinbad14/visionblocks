@@ -33,6 +33,10 @@ internal static class Icons
         ["indent"] = ("M3 4h14 M9 8h8 M9 12h8 M3 16h14 M3 8l3 2-3 2", false),
         ["outdent"] = ("M3 4h14 M9 8h8 M9 12h8 M3 16h14 M6 8l-3 2 3 2", false),
         ["trash"] = ("M4 6h12 M8 6V4h4v2 M5.5 6l1 11h7l1-11", false),
+        ["copy"] = ("M7 7h9v10H7z M4 13V3h9", false),
+        ["paste"] = ("M5 4.5h10v12.5H5z M8 3h4v3H8z M8 10h4 M8 13h4", false),
+        ["undo"] = ("M7 4.5L3 8.5l4 4 M3 8.5h9a4 4 0 0 1 0 8h-2", false),
+        ["redo"] = ("M13 4.5l4 4-4 4 M17 8.5H8a4 4 0 0 0 0 8h2", false),
         ["lang"] = ("M3 5h8 M7 3v2 M4.5 5c.5 3 2.5 5 5 6 M9.5 5c-.5 3-2.5 5-5.5 6.5 M11 17l3.5-8 3.5 8 M12 14.5h5", false),
     };
 

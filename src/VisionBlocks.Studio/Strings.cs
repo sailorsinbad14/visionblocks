@@ -50,6 +50,8 @@ internal static class L
         ["hint_toolGrid"] = ("拖框框出第一格 → 起名 → 成为网格；再在右边改列数、行数、间距，直到每个框都套住一个格子", "Drag around the first cell → name it → it becomes a grid; then adjust columns, rows and gaps on the right"),
         ["programHint"] = ("缩进 = 属于上一块", "Indented = belongs to the block above"),
         ["btnUp"] = ("上移", "Up"), ["btnDown"] = ("下移", "Down"), ["btnIndent"] = ("缩进", "Indent"), ["btnOutdent"] = ("取消缩进", "Outdent"), ["btnDelete"] = ("删除", "Delete"),
+        ["btnCopy"] = ("复制", "Copy"), ["btnPaste"] = ("粘贴", "Paste"), ["btnCut"] = ("剪切", "Cut"), ["btnDuplicate"] = ("复制一份", "Duplicate"),
+        ["btnUndo"] = ("撤销", "Undo"), ["btnRedo"] = ("重做", "Redo"),
         ["grpFlow"] = ("流程", "Flow"), ["grpSense"] = ("识别（生成「如果…」）", "Detect (makes an \"If…\")"), ["grpRecord"] = ("读取与记录", "Read & record"), ["grpAct"] = ("动作", "Actions"),
         ["palHint"] = ("点一下：加到选中积木的后面（选中「重复/如果」时加到里面）。也可以拖到右边的程序里。", "Click: insert after the selected block (inside it if it's a Repeat/If). Or drag it into the program."),
         ["props"] = ("属性", "Properties"), ["activity"] = ("活动", "Activity"),

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using OpenCvSharp;
 using VisionBlocks.Core.Vision;
 
@@ -15,7 +16,7 @@ public sealed class ProgramEditor
     public bool Dirty { get; private set; }
     public event Action? Changed;
 
-    private ProgramEditor(VbProgram p, string path) { Program = p; ProgramPath = path; }
+    private ProgramEditor(VbProgram p, string path) { Program = p; ProgramPath = path; _baseline = Snapshot(); }
 
     public static ProgramEditor CreateNew(string dir, string name)
     {
@@ -29,7 +30,100 @@ public sealed class ProgramEditor
 
     public void Save() { ProgramIO.Save(Program, ProgramPath); Dirty = false; }
 
-    public void Touch() { Dirty = true; Changed?.Invoke(); }
+    /// <summary>属性面板这类小改动：连续 1 秒内的几次并成一步撤销（2026-11-23）。</summary>
+    public void Touch() => Record(coalesce: true);
+
+    /// <summary>插入、删除、移动、加删资源这类结构性改动：每次单独一步撤销。</summary>
+    private void Commit() => Record(coalesce: false);
+
+    // ───────────── 撤销 / 重做（2026-11-23）：每次改动前整个程序存一份 JSON，最多 50 步 ─────────────
+
+    public const int MaxUndo = 50;
+    private readonly List<string> _undo = new();
+    private readonly Stack<string> _redo = new();
+    private string _baseline;
+    private long _lastRecordMs = long.MinValue / 2;
+    private bool _lastCoalesced;
+
+    private string Snapshot() => JsonSerializer.Serialize(Program, ProgramIO.Options);
+
+    private void Record(bool coalesce)
+    {
+        long now = Environment.TickCount64;
+        if (!(coalesce && _lastCoalesced && now - _lastRecordMs < 1000))
+        {
+            _undo.Add(_baseline);
+            if (_undo.Count > MaxUndo) _undo.RemoveAt(0);
+        }
+        _baseline = Snapshot();
+        _redo.Clear();
+        _lastRecordMs = now;
+        _lastCoalesced = coalesce;
+        Dirty = true;
+        Changed?.Invoke();
+    }
+
+    public bool CanUndo => _undo.Count > 0;
+    public bool CanRedo => _redo.Count > 0;
+
+    /// <summary>撤销一步。Program 会换成一个新对象，界面要重新取 Program 和选中项（用 PathOf / BlockAt 按位置找回来）。</summary>
+    public bool Undo()
+    {
+        if (_undo.Count == 0) return false;
+        _redo.Push(_baseline);
+        _baseline = _undo[^1];
+        _undo.RemoveAt(_undo.Count - 1);
+        Restore();
+        return true;
+    }
+
+    public bool Redo()
+    {
+        if (_redo.Count == 0) return false;
+        _undo.Add(_baseline);
+        _baseline = _redo.Pop();
+        Restore();
+        return true;
+    }
+
+    private void Restore()
+    {
+        Program = JsonSerializer.Deserialize<VbProgram>(_baseline, ProgramIO.Options)!;
+        _lastCoalesced = false;
+        Dirty = true;
+        Changed?.Invoke();
+    }
+
+    /// <summary>积木在树里的位置：每一层是「下标」，往里走时再跟一个分支号（0 = 里面 / 那么，1 = 否则）。撤销以后按它找回同一个位置的积木。</summary>
+    public List<int>? PathOf(Block target)
+    {
+        List<int>? Find(List<Block> l)
+        {
+            for (int i = 0; i < l.Count; i++)
+            {
+                if (ReferenceEquals(l[i], target)) return new List<int> { i };
+                if (l[i] is IContainerBlock c && Find(c.Body) is { } a) { a.InsertRange(0, new[] { i, 0 }); return a; }
+                if (l[i] is IfBlock ib && Find(ib.Else) is { } e) { e.InsertRange(0, new[] { i, 1 }); return e; }
+            }
+            return null;
+        }
+        return Find(Program.Program);
+    }
+
+    public Block? BlockAt(IReadOnlyList<int> path)
+    {
+        List<Block> l = Program.Program;
+        for (int k = 0; k < path.Count; k += 2)
+        {
+            if (path[k] < 0 || path[k] >= l.Count) return null;
+            var b = l[path[k]];
+            if (k + 1 >= path.Count) return b;
+            List<Block>? next = path[k + 1] == 1 ? (b as IfBlock)?.Else : (b as IContainerBlock)?.Body;
+            if (next == null) return null;
+            l = next;
+        }
+        return null;
+    }
 
     public static string Unique(string wanted, IEnumerable<string> existing)
     {
@@ -46,7 +140,7 @@ public sealed class ProgramEditor
         name = Unique(name, Program.Regions.Keys);
         r.Label = name;
         Program.Regions[name] = r;
-        Touch();
+        Commit();
         return name;
     }
 
@@ -54,7 +148,7 @@ public sealed class ProgramEditor
     {
         name = Unique(name, Program.Points.Keys);
         Program.Points[name] = new PointDef { Label = name, X = x, Y = y };
-        Touch();
+        Commit();
         return name;
     }
 
@@ -76,7 +170,7 @@ public sealed class ProgramEditor
         Cv2.ImWrite(Path.Combine(Dir, rel), toSave);
         if (!ReferenceEquals(toSave, sub)) toSave.Dispose();
         Program.Templates[name] = new TemplateDef { Label = name, File = rel.Replace('\\', '/') };
-        Touch();
+        Commit();
         return (name, warn);
     }
 
@@ -85,7 +179,7 @@ public sealed class ProgramEditor
     {
         name = Unique(name, Program.Grids.Keys);
         Program.Grids[name] = new GridDef { Label = name, X = firstCell.X, Y = firstCell.Y, W = firstCell.W, H = firstCell.H, Cols = cols, Rows = rows, GapX = gapX, GapY = gapY };
-        Touch();
+        Commit();
         return name;
     }
 
@@ -94,7 +188,7 @@ public sealed class ProgramEditor
         name = Unique(name, Program.Colors.Keys);
         var c = ColorRatio.FromSample(f, x, y, name);
         Program.Colors[name] = c;
-        Touch();
+        Commit();
         return name;
     }
 
@@ -156,7 +250,7 @@ public sealed class ProgramEditor
             case "color": Program.Colors.Remove(name); break;
             case "grid": Program.Grids.Remove(name); break;
         }
-        Touch();
+        Commit();
         return uses;
     }
 
@@ -236,12 +330,12 @@ public sealed class ProgramEditor
         else if (into && anchor is IContainerBlock c) c.Body.Add(nb);
         else if (Locate(anchor) is { } loc) loc.List.Insert(loc.Index + 1, nb);
         else Program.Program.Add(nb);
-        Touch();
+        Commit();
     }
 
     public void Remove(Block b)
     {
-        if (Locate(b) is { } loc) { loc.List.RemoveAt(loc.Index); Touch(); }
+        if (Locate(b) is { } loc) { loc.List.RemoveAt(loc.Index); Commit(); }
     }
 
     public void Move(Block b, int delta)
@@ -251,7 +345,7 @@ public sealed class ProgramEditor
         if (j < 0 || j >= loc.List.Count) return;
         loc.List.RemoveAt(loc.Index);
         loc.List.Insert(j, b);
-        Touch();
+        Commit();
     }
 
     /// <summary>缩进：放进前一个兄弟容器的末尾。</summary>
@@ -261,7 +355,7 @@ public sealed class ProgramEditor
         if (loc.List[loc.Index - 1] is not IContainerBlock prev) return false;
         loc.List.RemoveAt(loc.Index);
         prev.Body.Add(b);
-        Touch();
+        Commit();
         return true;
     }
 
@@ -273,7 +367,157 @@ public sealed class ProgramEditor
         if (parent == null || Locate(parent) is not { } ploc) return false;
         loc.List.RemoveAt(loc.Index);
         ploc.List.Insert(ploc.Index + 1, b);
-        Touch();
+        Commit();
         return true;
+    }
+
+    // ───────────── 复制、拖动、跨作用域上下移（2026-11-23） ─────────────
+
+    /// <summary>深拷贝一块积木（连同里面的积木），走 JSON 往返，和存盘同一套规则。</summary>
+    public static Block Clone(Block b) => JsonSerializer.Deserialize<Block>(JsonSerializer.Serialize(b, ProgramIO.Options), ProgramIO.Options)!;
+
+    /// <summary>某个列表属于哪块积木（顶层返回 null），以及是不是「否则」分支。</summary>
+    public (Block Owner, bool IsElse)? OwnerOf(List<Block> list)
+    {
+        foreach (var x in All())
+        {
+            if (x is IContainerBlock c && ReferenceEquals(c.Body, list)) return (x, false);
+            if (x is IfBlock i && ReferenceEquals(i.Else, list)) return (x, true);
+        }
+        return null;
+    }
+
+    /// <summary>list 是不是 b 里面的某个分支（直接或更深）。拖动时不能把积木放进它自己里面。</summary>
+    public static bool Contains(Block b, List<Block> list)
+    {
+        IEnumerable<List<Block>> Lists(Block x)
+        {
+            if (x is IContainerBlock c) yield return c.Body;
+            if (x is IfBlock i) yield return i.Else;
+        }
+        foreach (var l in Lists(b))
+        {
+            if (ReferenceEquals(l, list)) return true;
+            foreach (var ch in l) if (Contains(ch, list)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>落点：鼠标在哪块积木的什么位置。</summary>
+    public enum DropZone { Before, After, IntoFirst, ElseFirst, ElseEnd, BodyEnd, ProgramEnd }
+
+    /// <summary>落点 → 实际插入的列表和下标。anchor 是鼠标下的积木（ElseFirst / ElseEnd 时是那块「如果」）。</summary>
+    public (List<Block> List, int Index)? Slot(Block? anchor, DropZone zone) => zone switch
+    {
+        DropZone.ProgramEnd => (Program.Program, Program.Program.Count),
+        DropZone.IntoFirst when anchor is IContainerBlock c => (c.Body, 0),
+        DropZone.BodyEnd when anchor is IContainerBlock c => (c.Body, c.Body.Count),
+        DropZone.ElseFirst when anchor is IfBlock ib => (ib.Else, 0),
+        DropZone.ElseEnd when anchor is IfBlock ib => (ib.Else, ib.Else.Count),
+        DropZone.Before when anchor != null && Locate(anchor) is { } l1 => (l1.List, l1.Index),
+        DropZone.After when anchor != null && Locate(anchor) is { } l2 => (l2.List, l2.Index + 1),
+        _ => null
+    };
+
+    /// <summary>把积木挪到 list 的第 index 个位置（index 按挪走之前的列表算）。放进自己里面、或者原地不动，返回 false。</summary>
+    public bool MoveTo(Block b, List<Block> list, int index)
+    {
+        if (Contains(b, list) || Locate(b) is not { } loc) return false;
+        if (ReferenceEquals(loc.List, list) && (index == loc.Index || index == loc.Index + 1)) return false;
+        loc.List.RemoveAt(loc.Index);
+        if (ReferenceEquals(loc.List, list) && loc.Index < index) index--;
+        list.Insert(Math.Clamp(index, 0, list.Count), b);
+        Commit();
+        return true;
+    }
+
+    /// <summary>插到 list 的第 index 个位置（粘贴、按住 Ctrl 拖着复制、从积木架拖进来都用它）。</summary>
+    public void InsertAt(Block nb, List<Block> list, int index)
+    {
+        list.Insert(Math.Clamp(index, 0, list.Count), nb);
+        Commit();
+    }
+
+    /// <summary>
+    /// 上移一格，像 IDE 的「移动语句」：上面一块是容器，就进去放到它最后一个分支的末尾（「如果」是否则分支）；
+    /// 已经是第一块，就出到容器前面；在否则分支的第一块再上移，进到「那么」的末尾。顶层第一块不动，返回 false。
+    /// </summary>
+    public bool MoveUp(Block b)
+    {
+        if (Locate(b) is not { } loc) return false;
+        var (l, i) = loc;
+        if (i > 0)
+        {
+            var prev = l[i - 1];
+            l.RemoveAt(i);
+            if (prev is IfBlock pi) pi.Else.Add(b);
+            else if (prev is IContainerBlock pc) pc.Body.Add(b);
+            else l.Insert(i - 1, b);
+            Commit();
+            return true;
+        }
+        if (OwnerOf(l) is not { } own || Locate(own.Owner) is not { } ol) return false;
+        l.RemoveAt(0);
+        if (own.IsElse) ((IfBlock)own.Owner).Body.Add(b);
+        else ol.List.Insert(ol.Index, b);
+        Commit();
+        return true;
+    }
+
+    /// <summary>下移一格：下面一块是容器，就进去当第一块；已经是最后一块，就出到容器后面（「如果」的「那么」分支先进到否则分支的第一块）。顶层最后一块不动。</summary>
+    public bool MoveDown(Block b)
+    {
+        if (Locate(b) is not { } loc) return false;
+        var (l, i) = loc;
+        if (i < l.Count - 1)
+        {
+            var next = l[i + 1];
+            l.RemoveAt(i);
+            if (next is IContainerBlock nc) nc.Body.Insert(0, b);
+            else l.Insert(i + 1, b);
+            Commit();
+            return true;
+        }
+        if (OwnerOf(l) is not { } own || Locate(own.Owner) is not { } ol) return false;
+        l.RemoveAt(i);
+        if (!own.IsElse && own.Owner is IfBlock ib) ib.Else.Insert(0, b);
+        else ol.List.Insert(ol.Index + 1, b);
+        Commit();
+        return true;
+    }
+
+    /// <summary>一块积木（连同里面的）用到的资源：(种类, 名字)。「当前格」不算。</summary>
+    public static HashSet<(string Kind, string Name)> ResourcesUsedBy(Block root)
+    {
+        var set = new HashSet<(string, string)>();
+        void R(string? n) { if (!string.IsNullOrEmpty(n) && n != VbProgram.CurrentCell) set.Add(("region", n)); }
+        void C(Condition? c)
+        {
+            switch (c)
+            {
+                case ImageCondition i: R(i.Region); if (!string.IsNullOrEmpty(i.Template)) set.Add(("template", i.Template)); break;
+                case ColorCondition k: R(k.Region); if (!string.IsNullOrEmpty(k.Color)) set.Add(("color", k.Color)); break;
+                case TextCondition t: R(t.Region); break;
+            }
+        }
+        void B(Block b)
+        {
+            switch (b)
+            {
+                case RepeatUntilBlock ru: C(ru.Until); break;
+                case IfBlock ib: C(ib.Cond); break;
+                case WaitUntilBlock wu: C(wu.Cond); break;
+                case ClickBlock cb: R(cb.Region); if (!string.IsNullOrEmpty(cb.Point)) set.Add(("point", cb.Point)); C(cb.ConfirmCond); break;
+                case WheelBlock wb: R(wb.Region); if (!string.IsNullOrEmpty(wb.Point)) set.Add(("point", wb.Point)); break;
+                case DragBlock db: R(db.Region); break;
+                case ReadTextBlock rt: R(rt.Region); break;
+                case SaveImageBlock si: R(si.Region); break;
+                case ForEachCellBlock fe: if (!string.IsNullOrEmpty(fe.Grid)) set.Add(("grid", fe.Grid)); break;
+            }
+            if (b is IContainerBlock c) foreach (var x in c.Body) B(x);
+            if (b is IfBlock i2) foreach (var x in i2.Else) B(x);
+        }
+        B(root);
+        return set;
     }
 }

@@ -27,7 +27,7 @@ This guide has two parts: first **run a sample in five minutes** against the bui
 | ② Capture | **Capture frame**, plus 7 canvas tools: Select, Draw region, Place point, Crop template, Pick color, Try OCR, Draw grid |
 | ③ Resources | Your regions, templates, colors and grids as cards with thumbnails; click one to edit it on the right |
 | Center top | Canvas: the frozen frame. Bottom left shows the mouse position in **base coordinates** (1920 wide, independent of window size and monitor) |
-| ④ Build blocks | Block shelf on the left, the program on the right; title bar buttons: Up, Down, Indent, Outdent, Delete |
+| ④ Build blocks | Block shelf on the left, the program on the right; title bar buttons: Copy, Paste, Up, Down, Indent, Outdent, Delete. Blocks in the program can be dragged to a new place (a line shows where it will land, a dashed frame shows the Repeat / If it goes into; hold Ctrl when releasing to drop a copy), and the right-click menu has Copy, Cut, Paste, Duplicate, Delete. Up / Down step into and out of Repeat / If blocks, like an IDE's move-statement. Undo / Redo in the top bar cover every change (up to 50 steps) |
 | Right top | Properties of the selected block or resource; “Try it” tests a condition on the frozen frame |
 | Right bottom | Activity: hints and run log; “Open results” on its title bar |
 

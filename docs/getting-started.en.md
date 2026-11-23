@@ -177,7 +177,7 @@ Which kind your software is, you can only tell by running it once and reading th
 | Language | 中文 (default) / English, applies right away |
 | Theme | Use system setting (default) / Light / Dark, applies right away |
 | Show practice target | Shows Scene and Launch target in ①; off by default |
-| Randomize mouse actions | Off by default; asks before turning on. Clicks land at random spots inside the region with random hold and wait times; optional “Movement path” (curved, fast then slow) and “Overshoot”. **Only for testing whether your own software or game can tell automated input apart.** Each run's random seed is written to the run log (`bot.jsonl`) |
+| Randomize mouse actions | Off by default; asks before turning on. Clicks land at random spots inside the region with random hold and wait times; optional “Movement path” (curved, fast then slow) and “Overshoot”. **Only for testing whether your own software or game can tell automated input apart.** Each run's random seed is written to the run log (`bot.jsonl`). Movement time is not taken out of a Wait: a Click block first waits 30–120 ms, then moves, then presses, and a Wait block covers only its own span (×0.8–1.2 with “Position and timing” on); each wait's actual length is logged as a `wait` event |
 
 ![Dark theme](images/editor-dark.png)
 

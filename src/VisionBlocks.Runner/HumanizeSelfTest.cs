@@ -1,4 +1,9 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using VisionBlocks.Core.Capture;
 using VisionBlocks.Core.Input;
+using VisionBlocks.Core.Model;
+using VisionBlocks.Core.Runtime;
 using VisionBlocks.Core.Win32;
 
 namespace VisionBlocks.Runner;
@@ -10,6 +15,8 @@ namespace VisionBlocks.Runner;
 /// C. 轨迹：所有点在绑定窗口的客户区里，终点就是目标（目标在窗口外时夹回窗口内），总时长有上限；过冲时最后一步回到终点。
 /// D. 同一个种子结果完全一样，换种子就不一样。
 /// E. 和输入后端一起：轨迹走完才按下；移动途中被前台守卫拦下、或已经急停时，不会按下。
+/// F. 和运行器一起（2026-11-23）：「点 A → 等待 → 点 B」里，等待从 A 抬起之后才开始、等满了才结束，B 的移动轨迹在等待结束之后才开始，
+///    移动的时间不算进等待；日志里有 wait 事件（设的、随机后的、实际的）。目标窗口借用桌面窗口（只取它的客户区算坐标），输入全是假的。
 /// </summary>
 internal static class HumanizeSelfTest
 {
@@ -103,7 +110,74 @@ internal static class HumanizeSelfTest
         var aborted = Click(_ => true, true);
         Check("急停之后不移动也不按", !aborted.Any(e => e.StartsWith("mv", StringComparison.Ordinal) || e == "md"), $"发出 {aborted.Count} 个事件");
 
+        // F
+        foreach (bool timing in new[] { false, true })
+        {
+            var (ok, detail) = WaitTimeline(timing);
+            Check($"移动不算进等待（位置和时机{(timing ? "开" : "关")}）", ok, detail);
+        }
+
         Console.WriteLine(fails == 0 ? "随机化自测全部通过" : $"随机化自测失败 {fails} 项");
         return fails == 0 ? 0 : 1;
+    }
+    [DllImport("user32.dll")] private static extern IntPtr GetDesktopWindow();
+
+    private sealed class NoFrames : IFrameSource
+    {
+        public string Name => "none";
+        public void Start(IntPtr hwnd) { }
+        public Frame? TryGetLatest() => null;
+        public long LatestSeq => 0;
+        public event FrameHook? FrameArrived { add { } remove { } }
+        public void Dispose() { }
+    }
+
+    /// <summary>F：跑「点 A → 等待 400 → 点 B」，按同一个时钟（QPC）比较抬起、等待、移动的先后。</summary>
+    private static (bool Ok, string Detail) WaitTimeline(bool timing)
+    {
+        IntPtr desk = GetDesktopWindow();
+        if (!WindowInfo.TryGetClientOnScreen(desk, out var client)) return (false, "拿不到桌面窗口的客户区");
+        var p = new VbProgram { Name = "等待和移动" };
+        p.Points["A"] = new PointDef { Label = "A", X = 300, Y = 300 };
+        p.Points["B"] = new PointDef { Label = "B", X = 1500, Y = 800 };
+        p.Program.Add(new ClickBlock { Point = "A", Confirm = ConfirmMode.None });
+        p.Program.Add(new WaitBlock { Ms = 400 });
+        p.Program.Add(new ClickBlock { Point = "B", Confirm = ConfirmMode.None });
+        var sent = new List<(string Desc, long T)>();
+        (int, int) cursor = (client.X + 10, client.Y + 10);
+        var input = new SendInputBackend(new InputGuard(desk) { TestAllow = () => true }, null)
+        {
+            TestSender = d => { lock (sent) sent.Add((d, Stopwatch.GetTimestamp())); return 1; },
+            IsKeyPhysicallyDown = _ => false, CloseImeBeforeKeys = false,
+            CursorPosition = () => cursor, ClientRect = _ => client,
+            Humanizer = new Humanizer(timing, true, 11),
+        };
+        string logPath = Path.Combine(Path.GetTempPath(), $"vb-humanize-f-{Environment.ProcessId}.jsonl");
+        string? waitLine = null;
+        long waitAt = 0;
+        using (var log = new BotLog(logPath))
+        {
+            log.Line += l => { if (l.Contains("\"ev\":\"wait\"", StringComparison.Ordinal)) { waitLine = l; waitAt = Stopwatch.GetTimestamp(); } };
+            using var runner = new ProgramRunner(new RunContext { Program = p, ProgramDir = Path.GetTempPath(), Source = new NoFrames(), Input = input, Log = log, TargetHwnd = desk });
+            runner.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+        }
+        try { File.Delete(logPath); } catch { }
+        if (waitLine == null) return (false, "日志里没有 wait 事件");
+        using var doc = System.Text.Json.JsonDocument.Parse(waitLine);
+        int planned = doc.RootElement.GetProperty("planned").GetInt32();
+        long actual = doc.RootElement.GetProperty("actual").GetInt64();
+        double Ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+        int firstUp = sent.FindIndex(e => e.Desc == "mu");
+        int secondDown = sent.FindLastIndex(e => e.Desc == "md");
+        if (firstUp < 0 || secondDown <= firstUp) return (false, "没有两次完整的点击：" + string.Join(" ", sent.Select(e => e.Desc)));
+        var bMoves = sent.Skip(firstUp + 1).Take(secondDown - firstUp - 1).Where(e => e.Desc.StartsWith("mv", StringComparison.Ordinal)).ToList();
+        if (bMoves.Count == 0) return (false, "B 之前没有移动轨迹");
+        long waitStart = waitAt - (long)(actual * Stopwatch.Frequency / 1000.0);
+        double upToWait = Ms(waitStart - sent[firstUp].T);   // A 抬起 → 等待开始（≥ 0，允许 2ms 的取整误差）
+        double waitToMove = Ms(bMoves[0].T - waitAt);         // 等待结束 → B 开始移动（≥ 0）
+        double moveMs = Ms(bMoves[^1].T - bMoves[0].T);
+        bool plannedOk = timing ? planned >= 320 && planned <= 480 : planned == 400;
+        bool ok = plannedOk && actual >= planned - 2 && upToWait >= -2 && waitToMove >= 0 && moveMs > 50;
+        return (ok, $"设 400，随机后 {planned}，实际等 {actual}ms；A 抬起→等待开始 {upToWait:0}ms，等待结束→B 开始移动 {waitToMove:0}ms，B 移动 {moveMs:0}ms（{bMoves.Count} 步）");
     }
 }

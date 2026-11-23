@@ -140,8 +140,14 @@ public sealed class ProgramRunner : IDisposable
                 if (!await WaitUntil(wu.Cond, wu.TimeoutMs, ct)) WaitTimeouts++;
                 break;
             case WaitBlock w:
-                await Task.Delay(Math.Max(0, _c.Input.Humanizer?.Wait(w.Ms) ?? w.Ms), ct);
+            {
+                // 只等这么久：下一块点击的移动轨迹、移动前的小停顿都在那一块里，另外算（2026-11-23 写进日志，便于核对）
+                int planned = Math.Max(0, _c.Input.Humanizer?.Wait(w.Ms) ?? w.Ms);
+                var sw = Stopwatch.StartNew();
+                await Task.Delay(planned, ct);
+                _c.Log.Write(new { ev = "wait", ms = w.Ms, planned, actual = sw.ElapsedMilliseconds, t = BotLog.Now });
                 break;
+            }
             case KeyBlock k:
                 Publish($"按键 {k.Key}");
                 if (await _c.Input.PressAsync(k.Key, k.HoldMs, ct)) Keys++;

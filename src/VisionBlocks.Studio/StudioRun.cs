@@ -118,7 +118,7 @@ internal sealed class StudioRun
 
     private static readonly HashSet<string> Shown = new()
     {
-        "runStart", "runEnd", "keydown", "clickConfirm", "blocked", "imeOff", "waitTimeout", "loopTimeout",
+        "runStart", "runEnd", "keydown", "clickConfirm", "wait", "blocked", "imeOff", "waitTimeout", "loopTimeout",
         "paused", "resumed", "emergencyStop", "noFrame", "frameBack", "sendFailed",
         "row", "pass", "loopCap"
     };

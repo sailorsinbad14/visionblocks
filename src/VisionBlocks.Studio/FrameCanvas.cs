@@ -33,6 +33,49 @@ public static class CanvasMapper
     }
 }
 
+/// <summary>
+/// 「按距离滚」的预览（2026-11-22）：找和滚动热区重叠最多的网格，算出滚完以后格子落在哪里、和行距差多少。
+/// 画布画虚线格子用，属性卡的提示行也用。冻结帧上画的是推算，程序实际滚了多少看运行时遮罩。
+/// </summary>
+public static class WheelPreview
+{
+    public static (string Name, GridDef Grid)? GridIn(VbProgram p, RegionDef roi)
+    {
+        (string, GridDef)? best = null;
+        double bestArea = 0;
+        foreach (var (name, g) in p.Grids)
+        {
+            var gr = new Rect(g.X, g.Y, g.Cols * (g.W + g.GapX) - g.GapX, g.Rows * (g.H + g.GapY) - g.GapY);
+            gr.Intersect(new Rect(roi.X, roi.Y, roi.W, roi.H));
+            if (!gr.IsEmpty && gr.Width * gr.Height > bestArea) { bestArea = gr.Width * gr.Height; best = (name, g); }
+        }
+        return best;
+    }
+
+    /// <summary>滚 d 像素是几行；dev = 离最近的整行差多少像素（正 = 多滚了）。</summary>
+    public static (double Rows, int Dev, int Pitch) Align(GridDef g, int d)
+    {
+        int pitch = Math.Max(1, g.H + g.GapY);
+        int a = Math.Abs(d), off = a % pitch;
+        int dev = off <= pitch / 2 ? off : off - pitch;
+        return (a / (double)pitch, dev, pitch);
+    }
+
+    /// <summary>属性卡上的一句话。</summary>
+    public static string Hint(VbProgram p, WheelBlock wb)
+    {
+        if (wb.DistancePx is not int d || wb.Region == null || !p.Regions.TryGetValue(wb.Region, out var roi)) return "";
+        if (GridIn(p, roi) is not { } found)
+            return "热区里没有网格：截图上只画箭头。建一个网格框住物品格，就能看出滚完对不对得齐。";
+        var (name, g) = found;
+        var (rows, dev, pitch) = Align(g, d);
+        string gl = string.IsNullOrEmpty(g.Label) ? name : g.Label;
+        return Math.Abs(dev) <= 2
+            ? $"网格「{gl}」行距 {pitch} px：滚 {Math.Abs(d)} px = {Math.Round(rows)} 行，滚完正好对齐。"
+            : $"网格「{gl}」行距 {pitch} px：滚 {Math.Abs(d)} px = {rows:0.##} 行，滚完{(dev > 0 ? "多" : "少")} {Math.Abs(dev)} px，行对不齐。";
+    }
+}
+
 /// <summary>显示冻结帧，叠加热区、定点、拖拽框和「试一下」的结果框。鼠标事件以基准坐标抛出。</summary>
 public sealed class FrameCanvas : FrameworkElement
 {
@@ -41,6 +84,8 @@ public sealed class FrameCanvas : FrameworkElement
     public string? HighlightRegion, HighlightPoint, HighlightGrid;
     public RegionDef? TestRoi, TestBox;
     public bool TestHit;
+    /// <summary>选中「按距离滚」的滚轮积木时：画滚动箭头，并把网格按距离挪一份画成虚线（实时读积木上的距离）。</summary>
+    public WheelBlock? ScrollPreview;
     public Rect? Drag;
     public Point? Cursor;
     /// <summary>落在颜色范围内的像素（洋红、半透明），盖在冻结帧上。</summary>
@@ -140,6 +185,7 @@ public sealed class FrameCanvas : FrameworkElement
                 Label(dc, string.IsNullOrEmpty(p.Label) ? name : p.Label, p.X + 10 * inv, p.Y - 4 * inv, inv);
             }
         }
+        if (Program != null && ScrollPreview is { DistancePx: int dist, Region: string rn } && Program.Regions.TryGetValue(rn, out var sroi)) DrawScrollPreview(dc, Program, sroi, dist, inv);
         if (TestRoi != null) dc.DrawRectangle(null, new Pen(RegionHi.Brush, 3 * inv), new Rect(TestRoi.X, TestRoi.Y, TestRoi.W, TestRoi.H));
         if (TestBox != null) dc.DrawRectangle(null, new Pen((TestHit ? HitPen : MissPen).Brush, 3 * inv), new Rect(TestBox.X, TestBox.Y, TestBox.W, TestBox.H));
         if (Drag is { } d) dc.DrawRectangle(null, new Pen(DragPen.Brush, 2 * inv) { DashStyle = DashStyles.Dot }, d);
@@ -180,6 +226,47 @@ public sealed class FrameCanvas : FrameworkElement
         double cell = size / 11;
         dc.DrawRectangle(null, new Pen(new SolidColorBrush(Color.FromRgb(0xFF, 0x2B, 0xD6)), 1.5), new Rect(x + 6 + 5 * cell, y + 6 + 5 * cell, cell, cell));
         dc.DrawText(ft, new Point(x + 6, y + size + 10));
+    }
+
+    private static readonly Brush ArrowBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xFF, 0x8C, 0x28)));
+    private static readonly Brush GhostDark = Frozen(new SolidColorBrush(Color.FromArgb(170, 0, 0, 0)));
+
+    /// <summary>
+    /// 滚动预览：内容会往哪边、挪多远（橙色箭头，从热区竖直中线出发，最多画到热区边上），
+    /// 以及滚完以后格子在哪里（白色虚线，带深色底边，裁在热区里）。和实线网格重合 = 滚完对齐。
+    /// </summary>
+    private void DrawScrollPreview(DrawingContext dc, VbProgram p, RegionDef roi, int d, double inv)
+    {
+        var area = new Rect(roi.X, roi.Y, roi.W, roi.H);
+        dc.PushClip(new RectangleGeometry(area));
+        string text = $"{(d > 0 ? "向下" : "向上")}滚 {Math.Abs(d)} px";
+        if (WheelPreview.GridIn(p, roi) is { } found)
+        {
+            var g = found.Grid;
+            var (_, dev, pitch) = WheelPreview.Align(g, d);
+            text += Math.Abs(dev) <= 2 ? " · 滚完对齐" : $" · 差 {dev:+0;-0} px";
+            var dark = new Pen(GhostDark, 4 * inv);
+            var white = new Pen(Brushes.White, 2 * inv) { DashStyle = new DashStyle(new double[] { 4, 3 }, 0) };
+            // 内容的每一行在滚完以后的 y = g.Y + row*pitch - d；只画落进热区的那些行（列表比网格长，上下都可能有）
+            int r0 = (int)Math.Floor((roi.Y - g.H - g.Y + d) / (double)pitch), r1 = (int)Math.Ceiling((roi.Y + roi.H - g.Y + d) / (double)pitch);
+            for (int row = r0; row <= r1; row++)
+                for (int col = 0; col < g.Cols; col++)
+                {
+                    var cell = new Rect(g.X + col * (g.W + g.GapX), g.Y + row * pitch - d, g.W, g.H);
+                    dc.DrawRectangle(null, dark, cell);
+                    dc.DrawRectangle(null, white, cell);
+                }
+        }
+        double x = roi.X + roi.W - Math.Min(60, roi.W / 4.0), cy = roi.Y + roi.H / 2.0;
+        double len = Math.Min(Math.Abs(d), roi.H / 2.0 - 10), tipY = d > 0 ? cy - len : cy + len, head = (d > 0 ? 18 : -18) * inv;
+        var arrow = new Pen(ArrowBrush, 5 * inv) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        dc.DrawLine(arrow, new Point(x, cy), new Point(x, tipY));
+        dc.DrawLine(arrow, new Point(x, tipY), new Point(x - 12 * inv, tipY + head));
+        dc.DrawLine(arrow, new Point(x, tipY), new Point(x + 12 * inv, tipY + head));
+        dc.DrawEllipse(ArrowBrush, null, new Point(x, cy), 6 * inv, 6 * inv);
+        dc.Pop();
+        var ft = Text(text, 13 * inv);
+        Label(dc, text, Math.Max(roi.X, x - ft.Width - 24 * inv), d > 0 ? tipY : cy, inv);
     }
 
     private void Label(DrawingContext dc, string text, double x, double y, double inv)

@@ -190,12 +190,20 @@ public sealed class UntilNoNewRowsBlock : Block, IContainerBlock
     public List<Block> Body { get; set; } = new();
 }
 
-/// <summary>把鼠标移到定点或热区中心，滚动滚轮。Notches 为正向下滚，为负向上滚；一格 = WHEEL_DELTA 120。</summary>
+/// <summary>
+/// 把鼠标移到定点或热区中心，滚动滚轮。Notches 为正向下滚，为负向上滚；一格 = WHEEL_DELTA 120。
+/// DistancePx 不为空时改成「按距离滚」（2026-11-22）：在 Region 里边滚边量画面，滚够这么多基准像素就停（正数向下 = 内容往上走），
+/// 这时 Notches 不用。一格滚多少像素由目标程序决定，所以距离只能靠量画面来保证。
+/// </summary>
 public sealed class WheelBlock : Block
 {
     public string? Point { get; set; }
     public string? Region { get; set; }
     public int Notches { get; set; } = 1;
+    public int? DistancePx { get; set; }
+    /// <summary>按距离滚时差多少以内算到了（基准像素）；空 = 3。</summary>
+    public int? TolerancePx { get; set; }
+    public const int DefaultTolerancePx = 3;
 }
 
 /// <summary>识别热区里的文字，存进当前这一行的某个字段。</summary>

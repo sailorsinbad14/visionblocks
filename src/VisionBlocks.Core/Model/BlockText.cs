@@ -47,6 +47,7 @@ public static class BlockText
         StopBlock => "停止",
         ForEachCellBlock f => $"对网格「{LG(p, f.Grid)}」的每一格",
         UntilNoNewRowsBlock u => $"重复直到这一遍没有新记录（最多 {u.MaxTimes} 遍）",
+        WheelBlock { DistancePx: int d } w => $"在「{R(p, w.Region)}」滚轮{(d > 0 ? "向下" : "向上")} {Math.Abs(d)} px（边滚边量）",
         WheelBlock w => $"在「{(w.Point != null ? LP(p, w.Point) : R(p, w.Region))}」滚轮{(w.Notches > 0 ? "向下" : "向上")} {Math.Abs(w.Notches)} 格",
         ReadTextBlock r => $"读「{R(p, r.Region)}」的文字 → 字段「{r.Field}」" + (r.NumbersOnly ? "（只要数字）" : ""),
         SaveImageBlock s => $"截「{R(p, s.Region)}」存图 → 字段「{s.Field}」",

@@ -278,9 +278,11 @@ public sealed class SendInputBackend : IDisposable
     /// <summary>
     /// 把鼠标移到 (screenX, screenY) 再滚动滚轮（2026-11-20，背包翻页）。notches 为正向下滚。
     /// 每格单独发一次 WHEEL_DELTA=120，格与格之间隔 betweenMs，让程序逐格处理；每格都过一次闸和前台守卫。
+    /// unit：每个事件的 delta 大小，默认 120 一整格；「按距离滚」收尾时会发不足一格的（2026-11-22）。
     /// </summary>
-    public async Task<int> WheelAsync(int screenX, int screenY, int notches, int betweenMs, CancellationToken ct)
+    public async Task<int> WheelAsync(int screenX, int screenY, int notches, int betweenMs, CancellationToken ct, int unit = 120)
     {
+        unit = Math.Clamp(unit, 1, 120);
         var (ax, ay) = ToAbsolute(screenX, screenY);
         var abs = MOUSE_EVENT_FLAGS.MOUSEEVENTF_MOVE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_ABSOLUTE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_VIRTUALDESK;
         int sent = 0;
@@ -295,12 +297,13 @@ public sealed class SendInputBackend : IDisposable
                 if (!Gate($"wheel {screenX},{screenY}")) return sent;
                 Send(new[] { MouseInput(ax, ay, abs) }, "move");
                 var w = MouseInput(0, 0, MOUSE_EVENT_FLAGS.MOUSEEVENTF_WHEEL);
-                w.Anonymous.mi.mouseData = unchecked((uint)(notches > 0 ? -120 : 120));
+                w.Anonymous.mi.mouseData = unchecked((uint)(notches > 0 ? -unit : unit));
                 Send(new[] { w }, "wheel");
                 sent++;
             }
         }
-        _log?.Write(new { ev = "wheel", x = screenX, y = screenY, notches, sent, t = BotLog.Now });
+        if (unit == 120) _log?.Write(new { ev = "wheel", x = screenX, y = screenY, notches, sent, t = BotLog.Now });
+        else _log?.Write(new { ev = "wheel", x = screenX, y = screenY, notches, unit, sent, t = BotLog.Now });
         return sent;
     }
 

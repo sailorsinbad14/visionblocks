@@ -150,6 +150,26 @@ A few names are misread and the 药品 rows have an empty category: that is a li
 3. Coordinates are stored as 1920-wide base coordinates, so window size, monitor and scaling can change without editing the program, as long as the window keeps the same aspect ratio as when you captured.
 4. If the capture is black, the software is probably in exclusive fullscreen; switch it to windowed or borderless.
 
+### 5.1 Rows don't line up after scrolling: scroll by distance
+
+How many pixels one wheel notch scrolls is up to the target program. On the practice target one notch is exactly one row; other software may differ, so 3 notches can be 2.5 rows and cells get cut off. Switch the Wheel block to scroll by distance:
+
+1. Select the Wheel block and set **Scroll by** to **By distance px (measured)**. Scroll where must be a region, and the region should sit inside the scrolling content, without fixed headers, borders or scroll bars.
+2. Enter the distance in **Distance px**, positive = down. It is in base coordinates (1920 wide, same as regions). To scroll whole rows, enter row pitch × rows; Properties shows the grid's row pitch and whether the rows will line up.
+3. The frozen frame shows a preview: the orange arrow is the direction and distance the content moves, and the white dashed cells are where the cells will be after scrolling. If they sit on the grid, the rows line up.
+4. While running, it measures how far the picture actually moved after every scroll and stops when it has scrolled enough. The overlay shows “target · scrolled · steps · px per notch” next to the arrow; in the run log it is the `wheelPx` line.
+
+How exact it gets depends on the target program:
+
+| Target program | Result |
+|---|---|
+| Accepts partial notches (the practice target does) | The last part is sent as a fraction of a notch. Measured on the practice target: off by less than 1 px |
+| Whole notches only | Stops at the nearest whole notch, up to half a notch off; `subNotch` is false in the log. Rows may still not line up |
+| End of the list | Stops when the picture stops moving; the log says `end`. The last page still overlaps the one before, so keep deduplication on |
+| Can't measure (the region is blank, or all cells look the same and the shift is ambiguous) | Stops after at most one scroll; the log says `cantMeasure` |
+
+Which kind your software is, you can only tell by running it once and reading the log. Scrolling by distance waits for the picture to settle after each step, so it is a little slower than notches (about 0.2–0.5 s per step). If one notch moves more than a little over half the region's height, it can't keep track (about 500 px for an 870-tall region), so make the region as tall as you can.
+
 ## 6. Settings
 
 | Setting | What it does |
@@ -169,6 +189,7 @@ Each run's results folder holds `data.csv`, `images\` and `manifest.json`, and `
 
 - **“Read text” is always empty**: make sure Chinese (Simplified) is installed, widen the text region with blank space around it, and test with “Try OCR” in ② or “Try reading” in Properties.
 - **The pill stays red, “Input blocked”**: the target window is not in front. Don't touch the keyboard and mouse while running; pop-ups and notifications that take focus cause it too.
+- **Cells are cut off after scrolling, rows don't line up**: one notch in this software is not a whole row. Switch the Wheel block to scroll by distance, see [5.1](#51-rows-dont-line-up-after-scrolling-scroll-by-distance).
 - **Hotkeys don't respond**: another program holds <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> / <kbd>F12</kbd>; Activity says so. Use ■ Stop in the run capsule instead.
 - **Portable build says the folder is not writable and data moved to Documents**: move the whole folder somewhere writable, such as the Desktop or drive D.
 - **The taskbar still shows an old icon**: Windows' icon cache; unpin and pin again.

@@ -89,7 +89,13 @@ public static class ProgramIO
                         if (wb.Point == null && wb.Region == null) errs.Add($"{w}：滚轮没有指定定点或热区");
                         if (wb.Point != null && !p.Points.ContainsKey(wb.Point)) errs.Add($"{w}：定点「{wb.Point}」不存在");
                         if (wb.Region != null && !RegionOk(wb.Region, inCell)) errs.Add($"{w}：{RegionErr(wb.Region, inCell)}");
-                        if (wb.Notches == 0) errs.Add($"{w}：滚动格数不能是 0");
+                        if (wb.DistancePx == null && wb.Notches == 0) errs.Add($"{w}：滚动格数不能是 0");
+                        if (wb.DistancePx != null)
+                        {
+                            if (wb.DistancePx == 0) errs.Add($"{w}：滚动距离不能是 0");
+                            if (wb.Region == null) errs.Add($"{w}：按距离滚要选热区（在热区里量画面），不能用定点");
+                            if (wb.TolerancePx is < 1 or > 100) errs.Add($"{w}：容差要在 1–100 像素之间");
+                        }
                         break;
                     case ReadTextBlock rt:
                         if (!RegionOk(rt.Region, inCell)) errs.Add($"{w}：{RegionErr(rt.Region, inCell)}");

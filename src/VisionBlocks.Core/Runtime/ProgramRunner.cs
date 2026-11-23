@@ -42,6 +42,7 @@ public sealed class ProgramRunner : IDisposable
     private string _status = "";
     private RegionDef? _cell;             // 「对每一格」循环里的当前格子（基准坐标）
     private Recorder? _rec;
+    private readonly Dictionary<string, DistanceScroller> _scrollers = new();
 
     public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Reads;
     public int RowsRecorded => _rec?.Rows ?? 0;
@@ -182,6 +183,43 @@ public sealed class ProgramRunner : IDisposable
                     if (added == 0) break;
                     if (pass >= un.MaxTimes) { _c.Log.Write(new { ev = "loopCap", pass, t = BotLog.Now }); break; }
                 }
+                break;
+            }
+            case WheelBlock { DistancePx: int dist } wd:
+            {
+                var roi = Region(wd.Region!);
+                var (bx, by) = Inside(roi);
+                if (!ToScreen(bx, by, out int sx, out int sy)) break;
+                Publish($"滚轮 {dist} px");
+                // 每个热区在整个运行里共用一个：「认不认不足一格」只试一次，「每格多少像素」接着上次的用
+                if (!_scrollers.TryGetValue(wd.Region!, out var scroller))
+                    _scrollers[wd.Region!] = scroller = new DistanceScroller { Log = o => _c.Log.Write(o) };
+                scroller.Progress = (moved, steps, pn) => SetBox("scroll:" + wd.Region, ScrollArrow(roi, dist, moved, steps, pn));
+                var io = new DistanceScroller.Io(
+                    Send: (delta, count, c) => _c.Input.WheelAsync(sx, sy, Math.Sign(delta) * count, 60, c, Math.Abs(delta)),
+                    Grab: async c =>
+                    {
+                        await WaitNextFrame(c, 100);
+                        var f = await CurrentFrame(c);
+                        return (new Mat(f.Gray, f.ToPixels(roi)).Clone(), f.K);
+                    },
+                    Delay: (ms, c) => Task.Delay(ms, c),
+                    NowMs: () => Environment.TickCount64);
+                var res = await scroller.RunAsync(dist, wd.TolerancePx ?? WheelBlock.DefaultTolerancePx, io, ct);
+                if (res.EventsSent > 0) Wheels++;
+                _c.Log.Write(new
+                {
+                    ev = "wheelPx", want = dist, got = Math.Round(res.Moved, 1), steps = res.Steps,
+                    perNotch = res.PerNotch is double pn ? Math.Round(pn, 1) : (double?)null, subNotch = res.SubNotch,
+                    end = res.End, reason = res.Reason, fails = res.MeasureFails, events = res.EventsSent, t = BotLog.Now
+                });
+                Publish(res.Reason switch
+                {
+                    "end" => $"滚轮：到底了，滚了 {res.Moved:0} / {dist} px",
+                    "nearestNotch" => $"滚轮 {res.Moved:0} / {dist} px（这个程序只认整格）",
+                    "cantMeasure" => "滚轮：量不出画面移动，停下",
+                    _ => $"滚轮 {res.Moved:0} / {dist} px"
+                });
                 break;
             }
             case WheelBlock wb:
@@ -400,6 +438,18 @@ public sealed class ProgramRunner : IDisposable
         }
         if (!ok) ConfirmFails++;
         _c.Log.Write(new { ev = "clickConfirm", mode = cb.Confirm.ToString(), ok, ms = sw.ElapsedMilliseconds, bx, by, sx, sy, t = BotLog.Now });
+    }
+
+    /// <summary>遮罩上的滚动箭头：从热区竖直中线、靠右处出发，按实际滚过的距离画（最多画到热区边上），标「目标 · 已滚 · 步 · 每格」。</summary>
+    private static OverlayBox ScrollArrow(RegionDef roi, int dist, double moved, int steps, double? perNotch)
+    {
+        int x = roi.X + roi.W - Math.Min(60, roi.W / 4), cy = roi.Y + roi.H / 2;
+        int len = (int)Math.Round(Math.Min(Math.Abs(moved), roi.H / 2.0 - 10));
+        var box = moved >= 0
+            ? new RegionDef { X = x, Y = cy - len, W = 0, H = len }   // 向下滚：内容往上走，箭头朝上
+            : new RegionDef { X = x, Y = cy, W = 0, H = len };
+        string label = $"目标 {dist} · 已滚 {moved:0} px · {steps} 步" + (perNotch is double pn ? $" · 每格 {pn:0}" : "");
+        return new OverlayBox(box, label, moved >= 0 ? "scrollUp" : "scrollDown");
     }
 
     private void SetBox(string key, OverlayBox box)

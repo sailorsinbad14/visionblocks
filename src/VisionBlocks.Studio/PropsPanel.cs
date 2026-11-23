@@ -27,6 +27,7 @@ public sealed partial class MainWindow
         if (_selected is not ResourceRef { Kind: "color" }) _colorPick = ColorPick.None;
         _canvas.TestBox = null;
         _canvas.TestRoi = null;
+        _canvas.ScrollPreview = null;
         switch (_selected)
         {
             case Block b: BlockProps(b); break;
@@ -215,14 +216,47 @@ public sealed partial class MainWindow
                 break;
             case WheelBlock wb:
             {
+                // 2026-11-22：加「按距离 px」模式（边滚边量），冻结帧上预览滚完格子在哪里
+                bool byDist = wb.DistancePx != null;
+                var modes = new[] { L.Z("按格数"), L.Z("按距离 px（边滚边量）") };
+                Row("按什么滚", Combo(modes, modes[byDist ? 1 : 0], s =>
+                {
+                    if (s == modes[1] && wb.DistancePx == null)
+                    {
+                        // 默认滚「格数 × 行距」；热区里没有网格就按一格 120 px 估
+                        var g = wb.Region != null && _ed.Program.Regions.TryGetValue(wb.Region, out var r0) ? WheelPreview.GridIn(_ed.Program, r0) : null;
+                        int pitch = g is { } f ? f.Grid.H + f.Grid.GapY : 120;
+                        wb.DistancePx = Math.Sign(wb.Notches == 0 ? 1 : wb.Notches) * pitch * Math.Max(1, Math.Abs(wb.Notches));
+                    }
+                    else if (s == modes[0]) { wb.DistancePx = null; wb.TolerancePx = null; }
+                    Dispatcher.BeginInvoke(ShowProps);
+                }), "pWheelMode");
                 string? cur = wb.Point != null ? "定点：" + wb.Point : wb.Region != null ? "热区中心：" + wb.Region : null;
-                Row("在哪里滚", Combo(PlaceChoices(), cur, s =>
+                var places = byDist ? PlaceChoices().Where(x => x.StartsWith("热区中心：")).ToList() : PlaceChoices();
+                Row("在哪里滚", Combo(places, cur, s =>
                 {
                     if (s.StartsWith("定点：")) { wb.Point = s[3..]; wb.Region = null; }
                     else { wb.Region = s[5..]; wb.Point = null; }
+                    if (byDist) Dispatcher.BeginInvoke(ShowProps);
                 }), "pWheelTarget");
-                Row("格数", Num(wb.Notches, v => wb.Notches = (int)v == 0 ? 1 : (int)v, -50, 50), "pNotches");
-                Note("正数向下滚，负数向上滚。先把鼠标移到这里再滚：很多程序只滚鼠标底下的那块区域。滚一格移动多少由程序自己决定，最好先手动滚一下看看。");
+                if (!byDist)
+                {
+                    Row("格数", Num(wb.Notches, v => wb.Notches = (int)v == 0 ? 1 : (int)v, -50, 50), "pNotches");
+                    Note("正数向下滚，负数向上滚。先把鼠标移到这里再滚：很多程序只滚鼠标底下的那块区域。滚一格移动多少由程序自己决定，最好先手动滚一下看看。");
+                    Note("想让滚完正好对齐一行，可以切到「按距离 px」：边滚边量画面，还能在截图上预览滚完格子在哪里。");
+                    break;
+                }
+                var hint = Ui.Label(WheelPreview.Hint(_ed.Program, wb), 12);
+                AutomationProperties.SetAutomationId(hint, "pWheelHint");
+                Row("距离 px（正数向下）", Num(wb.DistancePx!.Value, v => { wb.DistancePx = (int)v == 0 ? 1 : (int)v; hint.Text = WheelPreview.Hint(_ed.Program, wb); }, -20000, 20000), "pDistance");
+                hint.Margin = new Thickness(0, -4, 0, 10);
+                _props.Children.Add(hint);
+                Row("容差 px", Num(wb.TolerancePx ?? WheelBlock.DefaultTolerancePx, v => wb.TolerancePx = (int)v == WheelBlock.DefaultTolerancePx ? null : (int)v, 1, 100), "pTolerance");
+                if (wb.Point != null) Note("按距离滚要选热区：在热区里量画面移动了多少。");
+                Note("每滚一下都在这个热区里量画面移动了多少，滚够就停。第一格顺便量出这个程序一格滚多少；最后不足一格时发不足一格的滚动，程序不认的话停在最近的整格。画面不动就当作到底了。距离按基准像素（1920×1080）算，和热区坐标一样。");
+                Note("热区要框在会滚动的内容里面，别框进不动的标题、边框和滚动条。截图上的橙色箭头和白色虚线格子是推算的滚动结果；实际滚了多少，运行时看遮罩上的「目标 · 已滚」。");
+                if (wb.Region != null && _ed.Program.Regions.ContainsKey(wb.Region)) _canvas.HighlightRegion = wb.Region;
+                _canvas.ScrollPreview = wb;
                 break;
             }
             case ReadTextBlock rt:

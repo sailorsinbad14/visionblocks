@@ -138,6 +138,7 @@ internal sealed class OverlayCanvas : FrameworkElement
     private static readonly Pen MatchPen = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(70, 220, 120)), 4));
     private static readonly Pen MissPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(200, 240, 160, 40)), 2));
     private static readonly Pen PointPen = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(250, 210, 60)), 3));
+    private static readonly Pen ArrowPen = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(255, 140, 40)), 5) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
     private static readonly Brush RunDot = Frozen(new SolidColorBrush(Color.FromRgb(0x3D, 0xD6, 0x8C)));
     private static readonly Brush PausedDot = Frozen(new SolidColorBrush(Color.FromRgb(0xF5, 0xB8, 0x3D)));
     private static readonly Brush BadDot = Frozen(new SolidColorBrush(Color.FromRgb(0xFF, 0x5C, 0x5C)));
@@ -156,12 +157,30 @@ internal sealed class OverlayCanvas : FrameworkElement
         foreach (var b in Scene.Boxes)
         {
             var r = new Rect(b.Box.X, b.Box.Y, b.Box.W, b.Box.H);
-            var pen = b.Kind switch { "match" => MatchPen, "miss" => MissPen, "point" => PointPen, _ => RegionPen };
-            dc.DrawRectangle(null, pen, r);
+            if (b.Kind is "scrollUp" or "scrollDown")
+            {
+                // 滚动箭头（2026-11-22）：竖线 + 箭头，箭头朝内容移动的方向
+                bool up = b.Kind == "scrollUp";
+                var tip = new Point(r.X, up ? r.Top : r.Bottom);
+                var tail = new Point(r.X, up ? r.Bottom : r.Top);
+                dc.DrawLine(ArrowPen, tail, tip);
+                double d = up ? 18 : -18;
+                dc.DrawLine(ArrowPen, tip, new Point(tip.X - 12, tip.Y + d));
+                dc.DrawLine(ArrowPen, tip, new Point(tip.X + 12, tip.Y + d));
+                dc.DrawEllipse(ArrowPen.Brush, null, tail, 6, 6);
+                r = new Rect(r.X - 8, r.Y, 0, r.Height);   // 标签贴着箭头上端
+            }
+            else
+            {
+                var pen = b.Kind switch { "match" => MatchPen, "miss" => MissPen, "point" => PointPen, _ => RegionPen };
+                dc.DrawRectangle(null, pen, r);
+            }
             if (!string.IsNullOrEmpty(b.Label))
             {
                 var ft = new FormattedText(b.Label, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, Face, 20, Brushes.White, dip);
-                var bg = new Rect(r.X, Math.Max(0, r.Y - 28), ft.Width + 12, 26);
+                // 滚动箭头靠热区右边，标签往左放，免得出窗口
+                double lx = b.Kind is "scrollUp" or "scrollDown" ? Math.Max(0, r.X - ft.Width - 12) : r.X;
+                var bg = new Rect(lx, Math.Max(0, r.Y - 28), ft.Width + 12, 26);
                 dc.DrawRectangle(LabelBg, null, bg);
                 dc.DrawText(ft, new Point(bg.X + 6, bg.Y + 2));
             }

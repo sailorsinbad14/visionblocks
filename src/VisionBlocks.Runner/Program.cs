@@ -44,6 +44,7 @@ public static class Program
                 "selftest-recorder" => RecorderSelfTest.Run(),
                 "selftest-sizing" => SizingSelfTest.Run(),
                 "selftest-humanize" => HumanizeSelfTest.Run(),
+                "selftest-wheelpx" => WheelPxSelfTest.Run(positional),
                 "run" => RunProgram(positional.FirstOrDefault() ?? throw new ArgumentException("缺少程序文件路径"), opts),
                 _ => throw new ArgumentException("未知子命令 " + args[0])
             };

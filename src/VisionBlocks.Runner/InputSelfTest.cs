@@ -9,6 +9,7 @@ namespace VisionBlocks.Runner;
 ///    旧做法「ReleaseAll + 取消」和新做法「Abort」对比：急停返回之后，还有没有新的按下被发出去。
 /// B. 急停时有键按住：Abort 必须把它抬起来。
 /// C. 用户按住 Ctrl：发送暂缓；在等待窗口内松开就照常发，一直按住就放弃。
+/// D. 按住拖动（2026-11-23）：一个任务不停拖，另一个线程在随机时刻急停，重复 300 次：按下最多一次、松开正好一次（有按下时），松开以后什么都不再发。
 /// </summary>
 internal static class InputSelfTest
 {
@@ -105,6 +106,44 @@ internal static class InputSelfTest
             bool ok = !sent1 && afterHeld == 0 && input.DeferredByModifier == 1 && sent2 && waited >= 35;
             Console.WriteLine($"C. 用户一直按住 LCtrl：发送={sent1}（暂缓 {input.DeferredByModifier} 次，事件 {afterHeld} 个）；40ms 后松开：发送={sent2}，等了 {waited}ms → {(ok ? "通过" : "不符")}");
             if (!ok) fails++;
+        }
+
+        {
+            int bad = 0, withDown = 0;
+            var sw = Stopwatch.StartNew();
+            var rng2 = new Random(20261123);
+            for (int i = 0; i < 300; i++)
+            {
+                var rec = new Recorder();
+                (int X, int Y) cur = (0, 0);   // 假光标：跟着发出去的位置走，「用户动了鼠标」的检查不会误报
+                var input = new SendInputBackend(new InputGuard(IntPtr.Zero) { TestAllow = () => true }, null)
+                {
+                    TestSender = d =>
+                    {
+                        if (d.StartsWith("dm ", StringComparison.Ordinal)) { var xy = d[3..].Split(','); cur = (int.Parse(xy[0]), int.Parse(xy[1])); }
+                        else if (d == "md") cur = (0, 0);
+                        return rec.Send(d);
+                    },
+                    IsKeyPhysicallyDown = _ => false, CloseImeBeforeKeys = false, CursorPosition = () => cur,
+                };
+                var path = Enumerable.Range(1, 40).Select(k => (0, -k * 5, 1)).ToList();
+                var drag = Task.Run(async () =>
+                {
+                    try { while (!input.Aborted) await input.DragAsync(0, 0, path, 2, 2, null, CancellationToken.None); }
+                    catch (OperationCanceledException) { }
+                });
+                Thread.Sleep(rng2.Next(0, 30));
+                input.Abort("测试");
+                drag.Wait(3000);
+                var ev = rec.Snapshot();
+                int md = ev.Count(x => x == "md"), mu = ev.Count(x => x == "mu");
+                int lastMu = ev.LastIndexOf("mu");
+                bool ok = md - mu == 0 && (lastMu < 0 || lastMu == ev.Count - 1) && drag.IsCompleted;
+                if (md > 0) withDown++;
+                if (!ok) bad++;
+            }
+            Console.WriteLine($"D. 按住拖动时另一个线程急停：300 次中 {withDown} 次急停时有按下，{bad} 次按下和松开没配对或松开后还发了东西（{sw.Elapsed.TotalSeconds:0.0}s） → {(bad == 0 ? "通过" : "不符")}");
+            if (bad > 0) fails++;
         }
 
         Console.WriteLine(fails == 0 ? "全部通过" : $"{fails} 项不符");

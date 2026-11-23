@@ -96,6 +96,7 @@ public static class Keymap
     /// <summary>所有动作，按设置里的分组排好。Default 为 null = 默认没有快捷键。</summary>
     public static readonly IReadOnlyList<ActionDef> Actions = new List<ActionDef>
     {
+        new("launch", "target", null), new("refresh", "target", null),
         new("new", "file", "Ctrl+N"), new("open", "file", "Ctrl+O"), new("save", "file", "Ctrl+S"), new("sample", "file", null),
         new("undo", "file", "Ctrl+Z"), new("redo", "file", "Ctrl+Y"), new("settings", "file", "Ctrl+Comma"),
         new("run", "run", "F5"), new("stop", "run", "Shift+F5"), new("openResults", "run", null),
@@ -119,6 +120,8 @@ public static class Keymap
         {
             string v = overrides != null && overrides.TryGetValue(a.Id, out var o) ? o : a.Default ?? "";
             map[a.Id] = TryParse(v, out var g) ? g.ToString() : "";
+            // 设置文件被手改成不合规矩的全局热键（不带 Ctrl / Alt）：退回默认
+            if (a.Global && map[a.Id] != "" && !(TryParse(map[a.Id], out var gg) && gg.HasCtrlOrAlt)) map[a.Id] = a.Default ?? "";
         }
         // 急停不能没有：设置文件被改坏了也退回默认
         if (map[EStop] == "") map[EStop] = Find(EStop)!.Default!;

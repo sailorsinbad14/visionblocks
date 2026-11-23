@@ -296,6 +296,7 @@ internal static class Ui
     /// <summary>动作在界面上叫什么（快捷键窗口用，按钮上的名字）。</summary>
     public static string ActionName(string id) => id switch
     {
+        "launch" => L.T("btnLaunch"), "refresh" => L.T("btnRefresh"),
         "new" => L.T("btnNew"), "open" => L.T("btnOpen"), "save" => L.T("btnSave"), "sample" => L.T("btnSample"),
         "undo" => L.T("btnUndo"), "redo" => L.T("btnRedo"), "settings" => L.T("settings"),
         "run" => L.T("btnRun"), "stop" => L.T("btnStop"), "openResults" => L.T("openResults"), "freeze" => L.T("btnFreeze"),
@@ -381,6 +382,7 @@ internal static class Ui
                     var key = e.Key switch { Key.System => e.SystemKey, Key.ImeProcessed => e.ImeProcessedKey, _ => e.Key };
                     if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) { e.Handled = true; return; }
                     if (key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None) return;   // Tab 照常切到下一个框
+                    if (key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None) { e.Handled = true; Keyboard.ClearFocus(); return; }   // Esc = 不改了
                     e.Handled = true;
                     if (Keymap.NameOfVk(KeyInterop.VirtualKeyFromKey(key)) is not { } kn) return;
                     var m = Keyboard.Modifiers;

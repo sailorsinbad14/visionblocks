@@ -396,7 +396,7 @@ public sealed partial class MainWindow : Window
         var practice = new StackPanel();
         practice.Children.Add(Tight(Txt("practiceHead", 12, "Text2"), new Thickness(0, 0, 0, 6), new Thickness(0, 0, 0, 4)));
         practice.Children.Add(Field("scene", _scene));
-        var launch = IconBtn("target", "btnLaunch", LaunchTarget, "btnLaunch", "InkButton");
+        var launch = IconBtn("target", "btnLaunch", LaunchTarget, "btnLaunch", "InkButton", action: "launch");
         launch.Margin = new Thickness(0);
         practice.Children.Add(launch);
         _practice.Child = practice;
@@ -412,7 +412,7 @@ public sealed partial class MainWindow : Window
         L.Reg(_windows, ToolTipProperty, "bindTip");
         _windows.SelectionChanged += (_, _) => OnBindSelected();
         s1.Children.Add(Field("bind", _windows));
-        var refresh = IconBtn("refresh", "btnRefresh", () => { RefreshMonitors(); RefreshWindows(); }, "btnRefresh");
+        var refresh = IconBtn("refresh", "btnRefresh", RefreshScreens, "btnRefresh", action: "refresh");
         refresh.HorizontalAlignment = HorizontalAlignment.Right;
         s1.Children.Add(refresh);
         var c1 = TightPad(Card(s1), new Thickness(16, 14, 16, 16), new Thickness(12, 10, 12, 10));
@@ -589,7 +589,12 @@ public sealed partial class MainWindow : Window
         _tree.GotKeyboardFocus += (_, _) => SyncTreeSelection();
         _tree.Drop += OnTreeDrop;
         _tree.DragOver += OnTreeDragOver;
-        _tree.DragLeave += (_, _) => ClearDropHint();
+        _tree.DragLeave += (_, e) =>
+        {
+            // DragLeave 会从树里的子元素冒泡上来：鼠标还在树的范围里就不清，免得指示线和位置条一闪一闪
+            var p = e.GetPosition(_tree);
+            if (p.X < 0 || p.Y < 0 || p.X > _tree.ActualWidth || p.Y > _tree.ActualHeight) ClearDropHint();
+        };
         // 2026-11-23：树里的积木可以拖（按住 Ctrl 松开 = 复制一份过去）；右键菜单；右键先选中鼠标下那一块
         _tree.PreviewMouseLeftButtonDown += (_, e) =>
         {
@@ -977,6 +982,7 @@ public sealed partial class MainWindow : Window
         {
             ["new"] = NewProgram, ["open"] = OpenProgram, ["save"] = SaveProgram, ["sample"] = LoadSample,
             ["undo"] = UndoEdit, ["redo"] = RedoEdit, ["settings"] = OpenSettings,
+            ["launch"] = LaunchTarget, ["refresh"] = RefreshScreens,
             ["run"] = Run, ["stop"] = () => _run?.Stop(), ["openResults"] = OpenResults, ["freeze"] = Freeze,
             ["copy"] = CopySelected, ["cut"] = CutSelected, ["paste"] = PasteAtSelection, ["duplicate"] = DuplicateSelected,
             ["delete"] = DeleteSelected, ["moveUp"] = MoveSelectedUp, ["moveDown"] = MoveSelectedDown, ["indent"] = IndentSelected, ["outdent"] = OutdentSelected,
@@ -1015,6 +1021,7 @@ public sealed partial class MainWindow : Window
     }
 
     private void SaveProgram() { _ed.Save(); UpdateTitle(); Log("已保存"); }
+    private void RefreshScreens() { RefreshMonitors(); RefreshWindows(); }
     private void LoadSample() => LoadProgram(AppPaths.SamplePatrol);
     private void DeleteSelected() => WithSelectedBlock(b => { _ed.Remove(b); _selected = null; });
     private void MoveSelectedUp() => WithSelectedBlock(b => { if (!_ed.MoveUp(b)) Log("已经在最上面了"); });
@@ -1133,60 +1140,64 @@ public sealed partial class MainWindow : Window
     private static FrameworkElement? HeaderOf(TreeViewItem it) => it.Template?.FindName("PART_Header", it) as FrameworkElement;
 
     /// <summary>
-    /// 鼠标在树上的位置 → 落点。积木的上半 = 放在它上面；下半 = 放在它下面，容器的下半 = 放进去当第一块；
-    /// 容器的底盖 = 放到容器后面（出作用域）；「否则」行 = 否则分支第一块；空容器的空槽 = 放进去；空白处 = 程序末尾。
+    /// 鼠标在树上的位置 → 落点。按每一行顶块和底盖的竖直位置算（积木之间的缝、立柱旁边的空白都不挡鼠标，命中测试会直接落到树的背景上）：
+    /// 积木的上半 = 放在它上面；下半 = 放在它下面，容器的下半 = 放进去当第一块；容器的底盖 = 放到容器后面（出作用域）；
+    /// 「否则」行 = 否则分支第一块；两行之间的缝 = 跟着上面那一行（容器顶块下面的缝 = 放进去，底盖下面的缝 = 容器后面）；最下面 = 程序末尾。
     /// 返回落点和画指示线用的位置（相对 _dropLayer）。
     /// </summary>
     private (List<Block> List, int Index, Point LineFrom, double LineW)? DropAt(DragEventArgs e)
     {
-        var item = ItemUnder(e.OriginalSource);
-        Point Pt(FrameworkElement el, double x, double y) => el.TranslatePoint(new Point(x, y), _dropLayer);
-        if (item == null)
+        double y = e.GetPosition(_tree).Y;
+        var rows = new List<(double Top, double Bottom, TreeViewItem Item, FrameworkElement Header, bool IsCap)>();
+        void Walk(ItemCollection items)
         {
-            var last = _tree.Items.OfType<TreeViewItem>().LastOrDefault(i => i.Tag is Block);
-            var at = last != null ? Pt(last, 0, last.ActualHeight - 4) : new Point(16, 14);
-            return (_ed.Program.Program, _ed.Program.Program.Count, at, 220);
+            foreach (var o in items)
+            {
+                if (o is not TreeViewItem { Tag: not null } it || HeaderOf(it) is not { IsVisible: true } h) continue;   // 空程序那行提示没有 Tag
+                double top = h.TranslatePoint(new Point(0, 0), _tree).Y;
+                rows.Add((top, top + h.ActualHeight, it, h, false));
+                Walk(it.Items);
+                if (it.Tag is IContainerBlock)
+                {
+                    double bottom = it.TranslatePoint(new Point(0, it.ActualHeight), _tree).Y;
+                    rows.Add((bottom - 21, bottom, it, h, true));   // 底盖 14 + 下边距 7
+                }
+            }
         }
-        var header = HeaderOf(item);
-        if (header == null) return null;
-        var p = e.GetPosition(header);
-        double hh = header.ActualHeight;
+        Walk(_tree.Items);
+        if (rows.Count == 0) return (_ed.Program.Program, _ed.Program.Program.Count, new Point(16, 14), 220);
+        rows.Sort((a, b) => a.Top.CompareTo(b.Top));
+        Point Pt(FrameworkElement el, double x, double yy) => el.TranslatePoint(new Point(x, yy), _dropLayer);
+        double W(FrameworkElement h) => Math.Max(160, Math.Min(h.ActualWidth, 420));
         (List<Block>, int, Point, double)? Slot(Block? anchor, ProgramEditor.DropZone z, Point line, double w)
             => _ed.Slot(anchor, z) is { } s ? (s.List, s.Index, line, w) : null;
-        double W(FrameworkElement h) => Math.Max(160, Math.Min(h.ActualWidth, 420));
-        switch (item.Tag)
+        (List<Block>, int, Point, double)? Below(TreeViewItem it, FrameworkElement h, bool isCap) => (isCap, it.Tag) switch
         {
-            case ElseMarker em:
-                if (p.Y <= hh) return Slot(em.Owner, ProgramEditor.DropZone.ElseFirst, Pt(header, 30, hh + 4), W(header));
-                return ChildGap(item, em.Owner.Else, p, header) ?? Slot(em.Owner, ProgramEditor.DropZone.ElseEnd, Pt(header, 30, hh + 4), W(header));
-            case Block b:
-                bool container = b is IContainerBlock;
-                if (p.Y < hh / 2) return Slot(b, ProgramEditor.DropZone.Before, Pt(header, 0, -4), W(header));
-                if (p.Y <= hh) return container ? Slot(b, ProgramEditor.DropZone.IntoFirst, Pt(header, 30, hh + 4), W(header)) : Slot(b, ProgramEditor.DropZone.After, Pt(header, 0, hh + 4), W(header));
-                if (!container) return Slot(b, ProgramEditor.DropZone.After, Pt(header, 0, hh + 4), W(header));
-                // 容器的身子里但不在某个子积木上：底盖（最下面 21 DIP）= 出到后面；空槽 = 放进去；两块之间的缝 = 放在上面那块后面
-                double py = e.GetPosition(item).Y;
-                if (py >= item.ActualHeight - 21) return Slot(b, ProgramEditor.DropZone.After, Pt(item, 0, item.ActualHeight - 4), W(header));
-                var body = ((IContainerBlock)b).Body;
-                return ChildGap(item, body, p, header) ?? Slot(b, ProgramEditor.DropZone.IntoFirst, Pt(header, 30, hh + 4), W(header));
-        }
-        return null;
-    }
-
-    /// <summary>容器身子里两块之间的缝：放在缝上面那块的后面。</summary>
-    private (List<Block>, int, Point, double)? ChildGap(TreeViewItem parent, List<Block> list, Point pInHeader, FrameworkElement parentHeader)
-    {
-        TreeViewItem? above = null;
-        foreach (var ch in parent.Items.OfType<TreeViewItem>())
+            (true, Block c) => Slot(c, ProgramEditor.DropZone.After, Pt(it, 0, it.ActualHeight - 4), W(h)),
+            (false, ElseMarker em) => Slot(em.Owner, ProgramEditor.DropZone.ElseFirst, Pt(h, 30, h.ActualHeight + 4), W(h)),
+            (false, IContainerBlock and Block c) => Slot(c, ProgramEditor.DropZone.IntoFirst, Pt(h, 30, h.ActualHeight + 4), W(h)),
+            (false, Block b) => Slot(b, ProgramEditor.DropZone.After, Pt(h, 0, h.ActualHeight + 4), W(h)),
+            _ => null
+        };
+        // 在某一行顶块上（顶块外面那圈选中框往上多算 4）
+        foreach (var r in rows)
+            if (!r.IsCap && y >= r.Top - 4 && y <= r.Bottom)
+            {
+                if (r.Item.Tag is Block b && y < (r.Top + r.Bottom) / 2) return Slot(b, ProgramEditor.DropZone.Before, Pt(r.Header, 0, -4), W(r.Header));
+                return Below(r.Item, r.Header, false);
+            }
+        // 在某个容器的底盖上
+        foreach (var r in rows)
+            if (r.IsCap && y >= r.Top && y <= r.Bottom) return Below(r.Item, r.Header, true);
+        // 缝里：跟着上面最近的那一行；最上面一行的上面 = 放在第一块前面
+        var above = rows.Where(r => r.Bottom <= y).OrderBy(r => r.Bottom).ToList();
+        if (above.Count == 0)
         {
-            if (ch.Tag is not Block) continue;
-            var top = ch.TranslatePoint(new Point(0, 0), parentHeader);
-            if (top.Y <= pInHeader.Y) above = ch;
+            var first = rows[0];
+            return first.Item.Tag is Block fb ? Slot(fb, ProgramEditor.DropZone.Before, Pt(first.Header, 0, -4), W(first.Header)) : null;
         }
-        if (above?.Tag is not Block ab || _ed.Locate(ab) is not { } loc || !ReferenceEquals(loc.List, list)) return null;
-        var h = HeaderOf(above) ?? above;
-        var line = above.TranslatePoint(new Point(0, above.ActualHeight - 4), _dropLayer);
-        return (list, loc.Index + 1, line, Math.Max(160, Math.Min(h.ActualWidth, 420)));
+        var a = above[^1];
+        return Below(a.Item, a.Header, a.IsCap);
     }
 
     private void OnTreeDragOver(object sender, DragEventArgs e)

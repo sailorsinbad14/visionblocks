@@ -50,6 +50,10 @@ public static class KeymapSelfTest
         Check("改过的叠上去；清空的为空；急停清空了退回默认；写坏的当成没有", ov["save"] == "Ctrl+Shift+S" && ov["copy"] == "" && ov[Keymap.EStop] == "Ctrl+Alt+F12" && ov["pal:click"] == "Ctrl+1" && ov["undo"] == "",
             $"保存 {ov["save"]}，复制「{ov["copy"]}」，急停 {ov[Keymap.EStop]}，点击 {ov["pal:click"]}，撤销「{ov["undo"]}」");
 
+        var hand = Keymap.Effective(new Dictionary<string, string> { [Keymap.EStop] = "F9", [Keymap.Pause] = "Shift+P" });
+        Check("设置文件被手改成不带 Ctrl / Alt 的暂停、急停：退回默认", hand[Keymap.EStop] == "Ctrl+Alt+F12" && hand[Keymap.Pause] == "Ctrl+Alt+F11", $"急停 {hand[Keymap.EStop]}，暂停 {hand[Keymap.Pause]}");
+        Check("「启动靶子」「刷新」也在表里", def.ContainsKey("launch") && def.ContainsKey("refresh"), "默认没有键");
+
         Console.WriteLine("D. 规矩和撞键");
         Keymap.Gesture G(string s) { Keymap.TryParse(s, out var g); return g; }
         var rules = new (string Name, string? Got, string? Want)[]

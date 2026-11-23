@@ -275,7 +275,7 @@ public sealed partial class MainWindow
                 Row("松手前停顿 ms", Num(db.HoldBeforeUpMs ?? DragBlock.DefaultHoldMs, v => db.HoldBeforeUpMs = (int)v == DragBlock.DefaultHoldMs ? null : (int)v, 0, 2000), "pDragHold");
                 Note("在热区里按住鼠标拖动，拖完量一下画面移了多少，差多少再补一笔，直到差在容差以内。正数向下翻（内容往上走，鼠标往上拖），和滚轮一样。距离按基准像素（1920×1080）算。");
                 Note("一笔最长约为热区高度的 45%，再长就分几笔。第一笔会量出「拖 1 px 画面动几 px」和按下后要移过多少才开始拖，之后接着用。拖了画面不动就当作到底了。同一个热区上一块还差的几 px 会加到下一块里，连拖几块也不会越差越多。");
-                Note("列表松手后会自己滑一段的，把「松手前停顿」调长一点；拖得太快被当成甩动的，把速度调慢。热区要框在会动的内容里，别框进不动的标题、边框和滚动条。");
+                Note("列表松手后还会自己滑一段的（Unity 做的游戏常这样），会自动发现，把这个热区的「松手前停顿」加倍再拖（最多 2 秒）；想省掉前几笔试探，直接调到 600 ms 左右。拖得太快被当成甩动的，把速度调慢。热区要框在会动的内容里，别框进不动的标题、边框和滚动条。");
                 if (_ed.Program.Regions.ContainsKey(db.Region)) _canvas.HighlightRegion = db.Region;
                 _canvas.DragPreview = db;
                 break;

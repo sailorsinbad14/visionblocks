@@ -49,17 +49,52 @@ public static class DragPxSelfTest
         public int Strokes;
         public Func<int, int>? CutAfterSteps;              // 第几笔只走到一半就返回（模拟暂停 / 用户动鼠标）
         public Func<int, double>? Wobble;                  // 第几笔比按门槛和比例算的多走几 px（正 = 内容往上）：真靶子上门槛、取整有几 px 误差
+        // 按速度的惯性（和靶子 --drag-inertia、Unity 的滚动列表一样）：拖动时速度按 τ = 0.1 秒平滑，按住不动时慢慢降下来；
+        // 松手后按松手时的速度滑，每秒剩 13.5%，速度不到 1 px/秒 或到头就停；按下就停住
+        public bool Fling;
+        private double _flingV, _flingOff0;
+        private long _flingT0;
         public SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused;
         private readonly Mat _content;
         private const int H = 870;
 
         public FakeList(Mat content, double start) { _content = content; Offset = start; }
 
-        public Mat Render() => new Mat(_content, new Rect(0, (int)Math.Round(Offset), _content.Width, H)).Clone();
+        public Mat Render()
+        {
+            Advance();
+            return new Mat(_content, new Rect(0, (int)Math.Round(Offset), _content.Width, H)).Clone();
+        }
 
-        private SendInputBackend.DragOutcome Drag(double[] legs)
+        private static readonly double FlingK = Math.Log(1 / 0.135);
+
+        /// <summary>惯性滑到现在（假时钟 T）的位置；滑停了就清掉速度。</summary>
+        private void Advance()
+        {
+            if (_flingV == 0) return;
+            double tau = (T - _flingT0) / 1000.0, stop = Math.Abs(_flingV) > 1 ? Math.Log(Math.Abs(_flingV)) / FlingK : 0;
+            double off = _flingOff0 + _flingV * (1 - Math.Exp(-FlingK * Math.Min(tau, stop))) / FlingK;
+            Offset = Math.Clamp(off, 0, MaxOffset);
+            if (tau >= stop || off != Offset) _flingV = 0;
+        }
+
+        /// <summary>列表最后停在哪（还在滑的话按滑停的位置）。</summary>
+        public double Final
+        {
+            get
+            {
+                if (_flingV == 0) return Offset;
+                double stop = Math.Abs(_flingV) > 1 ? Math.Log(Math.Abs(_flingV)) / FlingK : 0;
+                return Math.Clamp(_flingOff0 + _flingV * (1 - Math.Exp(-FlingK * stop)) / FlingK, 0, MaxOffset);
+            }
+        }
+
+        private SendInputBackend.DragOutcome Drag(double[] legs, int holdMs)
         {
             Strokes++;
+            Advance();
+            _flingV = 0;   // 按下就停住
+            double v = 0;
             double pos = 0, anchor = 0, start = Offset;
             bool dragging = false;
             int cut = CutAfterSteps?.Invoke(Strokes) ?? int.MaxValue, step = 0;
@@ -71,20 +106,24 @@ public static class DragPxSelfTest
                 {
                     if (step++ >= cut) { T += 200; return CutOutcome; }   // 后端已经松开（这里没有惯性）
                     pos += leg / n;
+                    double prevOff = Offset, dt = Math.Abs(leg / n) / 800;
                     if (!dragging && Math.Abs(pos) >= Threshold) { dragging = true; anchor = Jump ? 0 : pos; }
                     if (dragging) Offset = Math.Clamp(start + Ratio * (anchor - pos), 0, MaxOffset);   // 内容跟着光标：光标往上（负）内容往上（正）
+                    v += ((Offset - prevOff) / dt - v) * Math.Min(1, dt * 10);
                 }
                 T += (long)(Math.Abs(leg) / 0.8);   // 800 px/秒
             }
             // 惯性：松手后顺着最后一段再滑这一笔净位移的 Inertia 倍
             if (Inertia > 0) Offset = Math.Clamp(Offset + Inertia * (Offset - before), 0, MaxOffset);
             if (dragging && Wobble != null) Offset = Math.Clamp(Offset + Wobble(Strokes), 0, MaxOffset);
-            T += 230;
+            T += holdMs;   // 松手前按住不动：速度按 τ = 0.1 秒降下来
+            if (Fling && dragging) { _flingV = v * Math.Exp(-10 * holdMs / 1000.0); _flingT0 = T; _flingOff0 = Offset; }
+            T += 80;
             return SendInputBackend.DragOutcome.Ok;
         }
 
         public DistanceDragger.Io Io() => new(
-            Drag: (legs, ct) => Task.FromResult(Drag(legs)),
+            Drag: (legs, hold, ct) => Task.FromResult(Drag(legs, hold)),
             Grab: ct => { T += 16; return Task.FromResult((Render(), 1.0)); },
             Delay: (ms, ct) => { T += ms; return Task.CompletedTask; },
             NowMs: () => T,
@@ -95,7 +134,7 @@ public static class DragPxSelfTest
 
     private sealed record Case(string Name, int Goal, double Start = 0, double Threshold = 10, double Ratio = 1, bool Jump = false, double Inertia = 0,
         double MaxOffset = 4000, bool Flat = false, double? WantMoved = null, string WantReason = "done", Func<int, int>? Cut = null,
-        SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused, Func<int, double>? Wobble = null);
+        SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused, Func<int, double>? Wobble = null, bool Fling = false);
 
     private static void Loop()
     {
@@ -124,13 +163,16 @@ public static class DragPxSelfTest
             new Case("门槛估差几 px：最后一小笔只走了不到一半，但已在容差里 → 算到了", 100, Wobble: s => s == 2 ? -4 : s == 3 ? -0.5 : 0),
             new Case("门槛估差几 px：最后一小笔少走几 px、还没到 → 修正门槛接着拖", 100, Wobble: s => s == 2 ? -8 : s == 3 ? -1 : 0),
             new Case("到底只差几 px：两段的笔一下没动 → 到底", 100, MaxOffset: 94, WantMoved: 94, WantReason: "end"),
+            // 按速度的惯性（2026-11-23 真靶子 r3）：松手前停 150 ms 不够，松手后还滑三四十 px
+            new Case("松手后按速度惯性滑（像 Unity 的列表） 拖 240", 240, Fling: true),
+            new Case("松手后按速度惯性滑 向上拖 240", -240, Start: 600, Fling: true),
         };
         foreach (var c in cases)
         {
-            using var list = new FakeList(c.Flat ? flat : content, c.Start) { Threshold = c.Threshold, Ratio = c.Ratio, Jump = c.Jump, Inertia = c.Inertia, MaxOffset = c.MaxOffset, CutAfterSteps = c.Cut, CutOutcome = c.CutOutcome, Wobble = c.Wobble };
+            using var list = new FakeList(c.Flat ? flat : content, c.Start) { Threshold = c.Threshold, Ratio = c.Ratio, Jump = c.Jump, Inertia = c.Inertia, MaxOffset = c.MaxOffset, CutAfterSteps = c.Cut, CutOutcome = c.CutOutcome, Wobble = c.Wobble, Fling = c.Fling };
             var dr = new DistanceDragger();
             var res = dr.RunAsync(c.Goal, 3, 870, list.Io(), CancellationToken.None).GetAwaiter().GetResult();
-            double truth = list.Offset - c.Start;
+            double truth = list.Final - c.Start;
             bool ok;
             if (c.WantReason == "cantMeasure") ok = res.Reason == "cantMeasure" && list.Strokes == 0;
             else if (c.WantReason is "userMouse" or "blocked") ok = res.Reason == c.WantReason && Math.Abs(res.Moved - truth) <= 2 && dr.Carry == 0;
@@ -139,7 +181,7 @@ public static class DragPxSelfTest
                 double want = c.WantMoved is double w ? w * Math.Sign(c.Goal) : c.Goal;
                 ok = Math.Abs(truth - want) <= 3.5 && Math.Abs(res.Moved - truth) <= 2 && res.Reason == c.WantReason;
             }
-            Check(c.Name, ok, $"真实 {truth:0.0}，自测 {res.Moved:0.0}，{res.Strokes} 笔，比例 {res.Gain?.ToString("0.00") ?? "-"}，门槛 {res.Threshold?.ToString("0.0") ?? "-"}，{res.Reason}");
+            Check(c.Name, ok, $"真实 {truth:0.0}，自测 {res.Moved:0.0}，{res.Strokes} 笔，比例 {res.Gain?.ToString("0.00") ?? "-"}，门槛 {res.Threshold?.ToString("0.0") ?? "-"}，停顿 {res.HoldMs} ms，{res.Reason}");
         }
 
         // 同一个热区第二块：用上次量到的比例和门槛，第一笔就能拖长
@@ -177,6 +219,21 @@ public static class DragPxSelfTest
         d2.RunAsync(240, 3, 870, shortList.Io(), CancellationToken.None).GetAwaiter().GetResult();
         var rEnd = d2.RunAsync(720, 3, 870, shortList.Io(), CancellationToken.None).GetAwaiter().GetResult();
         Check("到底以后余差清零", rEnd.Reason == "end" && d2.Carry == 0 && shortList.Offset == 500, $"{rEnd.Reason}，余差 {d2.Carry}，位置 {shortList.Offset:0}");
+
+        // 照真靶子 r3 的程序在按速度惯性的列表上连拖 7 块（列表最多到 480）：每块停的位置、原因都要对
+        using var fling = new FakeList(content, 0) { Fling = true, MaxOffset = 480 };
+        var d3 = new DistanceDragger();
+        var plan = new (int Dist, double Pos, string Reason)[] { (240, 240, "done"), (-100, 140, "done"), (720, 480, "end"), (-480, 0, "done"), (100, 100, "done"), (100, 200, "done"), (100, 300, "done") };
+        var got = new List<string>();
+        bool all = true;
+        foreach (var (dist, pos, reason) in plan)
+        {
+            var r = d3.RunAsync(dist, 3, 870, fling.Io(), CancellationToken.None).GetAwaiter().GetResult();
+            bool ok = Math.Abs(fling.Final - pos) <= 3.5 && r.Reason == reason;
+            all &= ok;
+            got.Add($"{(ok ? "" : "✗")}{fling.Final:0}（{r.Strokes} 笔 {r.Reason}，停顿 {r.HoldMs}）");
+        }
+        Check("惯性列表上照 r3 连拖 7 块", all, string.Join("、", got));
     }
 
     // ── C：输入后端 ──

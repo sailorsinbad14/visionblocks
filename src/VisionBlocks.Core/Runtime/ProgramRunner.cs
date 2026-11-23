@@ -468,7 +468,7 @@ public sealed class ProgramRunner : IDisposable
         int speed = db.SpeedPxPerSec ?? DragBlock.DefaultSpeed, hold = db.HoldBeforeUpMs ?? DragBlock.DefaultHoldMs;
         var h = _c.Input.Humanizer;
         var io = new DistanceDragger.Io(
-            Drag: async (legs, c) =>
+            Drag: async (legs, holdMs, c) =>
             {
                 var (bx, _) = Inside(roi);
                 var (x0, y0, pts) = DistanceDragger.PathFor(legs, roi.X, roi.Y, roi.H, bx, speed, h);
@@ -479,7 +479,7 @@ public sealed class ProgramRunner : IDisposable
                     if (!ToScreenD(x, y, out int px, out int py)) return SendInputBackend.DragOutcome.Blocked;
                     path.Add((px, py, d));
                 }
-                int pressHold = h?.Hold(80) ?? 80, upHold = h != null ? h.Hold(Math.Max(10, hold)) : hold;
+                int pressHold = h?.Hold(80) ?? 80, upHold = h != null ? h.Hold(Math.Max(10, holdMs)) : holdMs;
                 return await _c.Input.DragAsync(sx, sy, path, pressHold, upHold, () => _c.IsPaused?.Invoke() == true, c);
             },
             Grab: async c =>
@@ -491,13 +491,13 @@ public sealed class ProgramRunner : IDisposable
             Delay: (ms, c) => Task.Delay(ms, c),
             NowMs: () => Environment.TickCount64,
             WaitWhilePaused: WaitIfPaused);
-        var res = await dragger.RunAsync(dist, db.TolerancePx ?? DragBlock.DefaultTolerancePx, roi.H, io, ct);
+        var res = await dragger.RunAsync(dist, db.TolerancePx ?? DragBlock.DefaultTolerancePx, roi.H, io, ct, hold);
         if (res.Strokes > 0) Drags++;
         _c.Log.Write(new
         {
             ev = "dragPx", want = dist, got = Math.Round(res.Moved, 1), strokes = res.Strokes,
             gain = res.Gain is double g ? Math.Round(g, 3) : (double?)null, threshold = res.Threshold is double t ? Math.Round(t, 1) : (double?)null,
-            end = res.End, reason = res.Reason, fails = res.MeasureFails, carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), t = BotLog.Now
+            end = res.End, reason = res.Reason, fails = res.MeasureFails, carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), hold = res.HoldMs, t = BotLog.Now
         });
         Publish(res.Reason switch
         {
@@ -506,7 +506,7 @@ public sealed class ProgramRunner : IDisposable
             "userMouse" => "拖动：鼠标被移动了，已松开并停下这一块",
             "blocked" => "拖动：输入被拦，已松开",
             _ => $"拖动 {res.Moved:0} / {dist} px"
-        });
+        } + (res.HoldMs > hold ? $"（松手后列表还在滑，松手前停顿已加长到 {res.HoldMs} ms）" : ""));
     }
 
     /// <summary>基准坐标（可带小数）→ 屏幕物理像素。</summary>

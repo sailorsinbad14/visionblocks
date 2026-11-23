@@ -1,5 +1,6 @@
 using OpenCvSharp;
 using VisionBlocks.Core.Input;
+using VisionBlocks.Core.Model;
 using VisionBlocks.Core.Vision;
 
 namespace VisionBlocks.Core.Runtime;
@@ -12,15 +13,17 @@ namespace VisionBlocks.Core.Runtime;
 /// 拖 1 px 内容动 g px（直接拖列表 g = 1，拖滚动条之类 g &gt; 1）。所以一笔「光标总共移 S（正 = 往下）、第一段的方向是 s1」时，
 /// 内容往上走 -g·(S - s1·T)。第一笔量出 g 和 T（每个热区记住，下一块接着用），之后按剩下的距离算下一笔。
 /// 剩下的太少、一笔短得可能过不了门槛时，在同一次按住里先往反方向拖过门槛、再拖回来（两段），净位移照样按上面的式子算。
+/// 松手后列表还按惯性滑（Unity 的滚动列表就是这样：拖动时的速度按帧平滑，按住不动要停一阵速度才降下来）：
+/// 每笔松手后拿第一帧和停稳的那一帧比，滑了就把这个热区「松手前停顿」加倍（最多 2 秒）再拖，滑的那一笔不拿来学比例和门槛。
 /// 输入和截图都通过 <see cref="Io"/> 传进来，自测可以换成假的。
 /// </summary>
 public sealed class DistanceDragger
 {
-    /// <param name="Drag">拖一笔：光标在 y 方向依次移这几段（基准像素，正 = 往下）。返回这一笔的结果；除了 Ok 都已经松开了。</param>
+    /// <param name="Drag">拖一笔：光标在 y 方向依次移这几段（基准像素，正 = 往下），最后停住多少毫秒再松开。返回这一笔的结果；除了 Ok 都已经松开了。</param>
     /// <param name="Grab">当前这一帧热区的灰度图（新的 Mat，用完由这里释放）和 K = 画面像素 / 基准像素。实现里要先等下一帧（有超时）。</param>
     /// <param name="WaitWhilePaused">暂停时在这里等到继续（不暂停就马上返回）。</param>
     public sealed record Io(
-        Func<double[], CancellationToken, Task<SendInputBackend.DragOutcome>> Drag,
+        Func<double[], int, CancellationToken, Task<SendInputBackend.DragOutcome>> Drag,
         Func<CancellationToken, Task<(Mat Gray, double K)>> Grab,
         Func<int, CancellationToken, Task> Delay,
         Func<long> NowMs,
@@ -30,7 +33,11 @@ public sealed class DistanceDragger
     /// <param name="Reason">done 到了 / end 到底了 / cantMeasure 量不出 / blocked 输入被拦 / userMouse 用户动了鼠标 / aborted 急停 / maxStrokes。</param>
     /// <param name="CarryIn">这一块开始时加上的、上一块还差的距离。</param>
     /// <param name="CarryOut">这一块停下时还差的，留给同一个热区的下一块。</param>
-    public sealed record Result(double Moved, int Strokes, double? Gain, double? Threshold, bool End, string Reason, int MeasureFails, double CarryIn, double CarryOut);
+    /// <param name="HoldMs">最后用的松手前停顿；松手后还在滑时会比积木设的长。</param>
+    public sealed record Result(double Moved, int Strokes, double? Gain, double? Threshold, bool End, string Reason, int MeasureFails, double CarryIn, double CarryOut, int HoldMs);
+
+    /// <summary>松手前停顿最多加长到多少毫秒。</summary>
+    public const int MaxHoldMs = 2000;
 
     public const int MaxStrokes = 20;
     /// <summary>一段比这个短，就可能过不了目标程序的拖动门槛，改成「先反向再拖回来」的两段。</summary>
@@ -40,22 +47,25 @@ public sealed class DistanceDragger
     public double? GainHint { get; set; }
     /// <summary>上次在这个热区量到的：每一笔开头被拖动门槛吃掉多少 px。</summary>
     public double? ThresholdHint { get; set; }
+    /// <summary>这个热区松手后还在滑、已经加长到的松手前停顿（毫秒）；没滑过为 null。</summary>
+    public int? HoldHint { get; set; }
     /// <summary>上一块停下时还差的距离（带方向）。只在「到了」时记下；到底、量不出、被拦时清零。</summary>
     public double Carry { get; set; }
     /// <summary>每笔之后：已走（带方向）、笔数。</summary>
     public Action<double, int>? Progress { get; set; }
     public Action<object>? Log { get; set; }
 
-    public async Task<Result> RunAsync(int distancePx, int tolerancePx, int regionHBase, Io io, CancellationToken ct)
+    public async Task<Result> RunAsync(int distancePx, int tolerancePx, int regionHBase, Io io, CancellationToken ct, int holdMs = DragBlock.DefaultHoldMs)
     {
         double tol = Math.Max(1, tolerancePx);
+        int hold = Math.Max(holdMs, HoldHint ?? 0);
         double carryIn = Carry;
         Carry = 0;
         double target = distancePx + carryIn;
         if (Math.Abs(target) <= tol)
         {
             Carry = target;
-            return new Result(0, 0, GainHint, ThresholdHint, false, "done", 0, carryIn, Carry);
+            return new Result(0, 0, GainHint, ThresholdHint, false, "done", 0, carryIn, Carry, hold);
         }
         await io.WaitWhilePaused(ct);
         var (prev, k) = await DistanceScroller.Settle(io.Grab, io.Delay, io.NowMs, io.NowMs() - DistanceScroller.MinWaitMs, ct);
@@ -72,7 +82,7 @@ public sealed class DistanceDragger
             if (!ScrollMeter.HasTexture(prev, Math.Sign(target)))
             {
                 Log?.Invoke(new { ev = "dragStroke", stroke = 0, ok = false, why = "热区里画面太平，量不出移动，没有拖" });
-                return new Result(0, 0, GainHint, ThresholdHint, false, "cantMeasure", 0, carryIn, 0);
+                return new Result(0, 0, GainHint, ThresholdHint, false, "cantMeasure", 0, carryIn, 0, hold);
             }
             while (true)
             {
@@ -105,15 +115,15 @@ public sealed class DistanceDragger
                     legs = new[] { dir * a, s - dir * a };
                     predicted = -gain * (s - dir * thr);
                 }
-                var outcome = await io.Drag(legs, ct);
+                var outcome = await io.Drag(legs, hold, ct);
                 strokes++;
-                var (cur, progress, r) = await Measure(io, prev, predicted, k, ct);
+                var (cur, progress, r, slide) = await Measure(io, prev, predicted, k, outcome == SendInputBackend.DragOutcome.Ok ? -Math.Sign(legs[^1]) : 0, ct);
                 if (outcome == SendInputBackend.DragOutcome.Paused)
                 {
                     // 拖到一半暂停了：已经松开。等继续以后再量一次，按量到的接着拖
                     await io.WaitWhilePaused(ct);
                     cur.Dispose();
-                    (cur, progress, r) = await Measure(io, prev, null, k, ct);
+                    (cur, progress, r, _) = await Measure(io, prev, null, k, 0, ct);
                 }
                 if (!r.Ok)
                 {
@@ -129,8 +139,16 @@ public sealed class DistanceDragger
                 }
                 string note = "";
                 bool isSingle = legs.Length == 1;
+                int holdUsed = hold;
+                // 松手后还在滑：这一笔走了多少照算，但不拿来判断到底、也不学比例和门槛；这个热区以后松手前停久一点
+                if (outcome == SendInputBackend.DragOutcome.Ok && r.Ok && Math.Abs(slide) > Math.Max(1, tol / 2))
+                {
+                    note = "slide";
+                    hold = Math.Min(MaxHoldMs, Math.Max(2 * hold, 300));
+                    HoldHint = hold;
+                }
                 // 到底和学习只看完整拖完的一笔；拖到一半暂停的那一笔走了多少就算多少
-                if (outcome == SendInputBackend.DragOutcome.Ok)
+                else if (outcome == SendInputBackend.DragOutcome.Ok)
                 {
                     if (Math.Abs(progress) < 0.5 && isSingle && Math.Abs(legs[0]) >= MinSingleLeg) { end = true; note = "noMove"; }
                     else if (Math.Abs(progress) < 0.5 && !isSingle) { end = true; note = "noMoveTwoLeg"; }
@@ -146,7 +164,8 @@ public sealed class DistanceDragger
                     {
                         // 两段的笔只用来修正门槛：净位移 = dir·want + g·dir·(T真 - T估)，所以 T真 = T估 + (走的 - want) / g
                         double t = thr + (progress * dir - want) / gain;
-                        if (t > -5 && t < 80) { thr = Math.Clamp(t, 0, 60); note = "thresholdTwoLeg"; learnedCount++; }
+                        if (t < 80) { thr = Math.Clamp(t, 0, 60); note = "thresholdTwoLeg"; learnedCount++; }   // 算出来是负的 = 门槛估高了很多：归零
+                        else note = "thresholdOut";
                     }
                 }
                 moved += progress;
@@ -157,7 +176,8 @@ public sealed class DistanceDragger
                 {
                     ev = "dragStroke", stroke = strokes, legs = legs.Select(l => Math.Round(l, 1)), outcome = outcome.ToString(),
                     predicted = Math.Round(predicted, 1), progress = Math.Round(progress, 1), moved = Math.Round(moved, 1),
-                    gain = Math.Round(gain, 3), threshold = Math.Round(thr, 1), ok = r.Ok, score = Math.Round(r.Score, 3), note
+                    gain = Math.Round(gain, 3), threshold = Math.Round(thr, 1), ok = r.Ok, score = Math.Round(r.Score, 3), note,
+                    hold = holdUsed, slide = Math.Round(slide, 1)
                 });
                 Progress?.Invoke(moved, strokes);
                 if (outcome is not (SendInputBackend.DragOutcome.Ok or SendInputBackend.DragOutcome.Paused)) { reason = Why(outcome); break; }
@@ -169,7 +189,7 @@ public sealed class DistanceDragger
         if (known && (!end || learnedCount >= 2)) { GainHint = gain; ThresholdHint = thr; }
         // 只有「到了」才把零头带给下一块；到底了、量不出、被拦时位置不可信，清零
         Carry = reason == "done" ? target - moved : 0;
-        return new Result(moved, strokes, known ? gain : null, known ? thr : null, end, reason, fails, carryIn, Carry);
+        return new Result(moved, strokes, known ? gain : null, known ? thr : null, end, reason, fails, carryIn, Carry, hold);
     }
 
     private static string Why(SendInputBackend.DragOutcome o) => o switch
@@ -197,24 +217,36 @@ public sealed class DistanceDragger
             note = "learned";
             return;
         }
+        // 算出来不在合理范围的不算学到（note 不同、不计数）；门槛算出来是负的（动得比拖的还多）往 0 拉，不能就此卡在一个估高的值上
         if (s - thr >= 100)
         {
             double g = m / (s - thr);
-            if (g > 0.2 && g < 20) gain = 0.5 * (gain + g);
-            note = "gain";
+            if (g > 0.2 && g < 20) { gain = 0.5 * (gain + g); note = "gain"; }
+            else note = "gainOut";
         }
         else
         {
             double t = s - m / gain;
-            if (t > -5 && t < 80) thr = Math.Clamp(0.5 * (thr + t), 0, 60);
-            note = "threshold";
+            if (t < 80) { thr = Math.Clamp(0.5 * (thr + Math.Max(t, 0)), 0, 60); note = "threshold"; }
+            else note = "thresholdOut";
         }
     }
 
-    /// <summary>松开以后等画面停稳再量；按预计的方向找，找不到再按反方向找一次（两段的笔、或者门槛估错时，可能往反方向动了）。</summary>
-    private static async Task<(Mat Cur, double Progress, ScrollMeter.Result R)> Measure(Io io, Mat prev, double? predicted, double k, CancellationToken ct)
+    /// <summary>
+    /// 松开以后等画面停稳再量；按预计的方向找，找不到再按反方向找一次（两段的笔、或者门槛估错时，可能往反方向动了）。
+    /// slideDir 不为 0 时先拿松手后的第一帧，和停稳的那一帧比，返回松手后又滑了多少（基准像素）。
+    /// </summary>
+    private static async Task<(Mat Cur, double Progress, ScrollMeter.Result R, double Slide)> Measure(Io io, Mat prev, double? predicted, double k, int slideDir, CancellationToken ct)
     {
+        Mat? first = slideDir != 0 ? (await io.Grab(ct)).Gray : null;
         var (cur, _) = await DistanceScroller.Settle(io.Grab, io.Delay, io.NowMs, io.NowMs(), ct);
+        double slide = 0;
+        if (first != null)
+        {
+            var rs = ScrollMeter.Measure(first, cur, slideDir, null);
+            if (rs.Ok) slide = rs.ShiftPx / k;
+            first.Dispose();
+        }
         int dir = predicted is double p && Math.Abs(p) > 0.5 ? Math.Sign(p) : 1;
         var r = ScrollMeter.Measure(prev, cur, dir, predicted is double e ? Math.Abs(e) * k : null);
         if (!r.Ok || Math.Abs(r.ShiftPx) < 0.5)
@@ -222,7 +254,7 @@ public sealed class DistanceDragger
             var r2 = ScrollMeter.Measure(prev, cur, -dir, null);
             if (r2.Ok && Math.Abs(r2.ShiftPx) >= 0.5) r = r2;
         }
-        return (cur, r.Ok ? r.ShiftPx / k : 0, r);
+        return (cur, r.Ok ? r.ShiftPx / k : 0, r, slide);
     }
 
     /// <summary>

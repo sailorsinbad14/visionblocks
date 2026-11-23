@@ -20,6 +20,10 @@ public sealed class TargetOptions
     public string Scene = "patrol";      // patrol = 巡逻小游戏；inventory = 背包（2026-11-20）
     public int OpenItem = -1;            // 背包：启动时直接打开第一个分类里第 N 个物品的详情（截样张用）
     public int ScrollStep = 0;           // 背包：滚轮一格滚多少基准像素；0 = 正好一行（对齐）
+    // 背包的按住拖动（2026-11-23）：按下不放、竖着移过门槛就拖列表，没拖动的松开才算点击
+    public double DragThreshold = 10;    // 门槛（基准像素）；0 = 关掉拖动，恢复「一按下就点开」的旧行为
+    public double DragRatio = 1;         // 拖 1 像素列表动几像素（1 = 跟手；大于 1 模拟拖滚动条）
+    public bool DragInertia = false;     // 松手后按松手时的速度再滑一段（每秒剩 13.5%，和常见 UI 库的默认值一样）
 
     public static TargetOptions Parse(string[] args)
     {
@@ -48,6 +52,9 @@ public sealed class TargetOptions
                 case "--scene": o.Scene = Next(); break;
                 case "--open-item": o.OpenItem = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--scroll-step": o.ScrollStep = int.Parse(Next(), CultureInfo.InvariantCulture); break;
+                case "--drag-threshold": o.DragThreshold = double.Parse(Next(), CultureInfo.InvariantCulture); break;
+                case "--drag-ratio": o.DragRatio = double.Parse(Next(), CultureInfo.InvariantCulture); break;
+                case "--drag-inertia": o.DragInertia = true; break;
                 default: throw new ArgumentException($"未知参数 {a}");
             }
         }

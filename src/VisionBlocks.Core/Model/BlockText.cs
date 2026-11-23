@@ -49,6 +49,7 @@ public static class BlockText
         UntilNoNewRowsBlock u => $"重复直到这一遍没有新记录（最多 {u.MaxTimes} 遍）",
         WheelBlock { DistancePx: int d } w => $"在「{R(p, w.Region)}」滚轮{(d > 0 ? "向下" : "向上")} {Math.Abs(d)} px（边滚边量）",
         WheelBlock w => $"在「{(w.Point != null ? LP(p, w.Point) : R(p, w.Region))}」滚轮{(w.Notches > 0 ? "向下" : "向上")} {Math.Abs(w.Notches)} 格",
+        DragBlock d => $"在「{R(p, d.Region)}」按住拖动，{(d.DistancePx > 0 ? "向下翻" : "向上翻")} {Math.Abs(d.DistancePx)} px（边拖边量）",
         ReadTextBlock r => $"读「{R(p, r.Region)}」的文字 → 字段「{r.Field}」" + (r.NumbersOnly ? "（只要数字）" : ""),
         SaveImageBlock s => $"截「{R(p, s.Region)}」存图 → 字段「{s.Field}」",
         RecordRowBlock rr => "记录一行" + (rr.DedupeBy.Count > 0 ? $"（按「{string.Join("+", rr.DedupeBy)}」去重）" : ""),

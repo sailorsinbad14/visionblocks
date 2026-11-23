@@ -97,6 +97,13 @@ public static class ProgramIO
                             if (wb.TolerancePx is < 1 or > 100) errs.Add($"{w}：容差要在 1–100 像素之间");
                         }
                         break;
+                    case DragBlock db:
+                        if (!RegionOk(db.Region, inCell)) errs.Add($"{w}：{RegionErr(db.Region, inCell)}");
+                        if (db.DistancePx == 0) errs.Add($"{w}：拖动距离不能是 0");
+                        if (db.TolerancePx is < 1 or > 100) errs.Add($"{w}：容差要在 1–100 像素之间");
+                        if (db.SpeedPxPerSec is < 50 or > 5000) errs.Add($"{w}：拖动速度要在 50–5000 像素 / 秒之间");
+                        if (db.HoldBeforeUpMs is < 0 or > 2000) errs.Add($"{w}：松手前停顿要在 0–2000 毫秒之间");
+                        break;
                     case ReadTextBlock rt:
                         if (!RegionOk(rt.Region, inCell)) errs.Add($"{w}：{RegionErr(rt.Region, inCell)}");
                         if (string.IsNullOrWhiteSpace(rt.Field)) errs.Add($"{w}：没有填字段名");

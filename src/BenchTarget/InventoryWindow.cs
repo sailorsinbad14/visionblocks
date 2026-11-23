@@ -39,6 +39,7 @@ public sealed class InventoryWindow : Window
         PreviewKeyUp += OnKeyUp;
         _view.MouseLeftButtonDown += (_, e) => OnMouse(e, true);
         _view.MouseLeftButtonUp += (_, e) => OnMouse(e, false);
+        _view.MouseMove += (_, e) => { if (e.LeftButton == MouseButtonState.Pressed) _scene.OnMove(Base(e), Stopwatch.GetTimestamp()); };
         _view.MouseWheel += (_, e) => _scene.OnWheel(e.Delta, Base(e), Stopwatch.GetTimestamp());
         Activated += (_, _) => _log.Write(new { ev = "focus", on = true, t = Stopwatch.GetTimestamp() });
         Deactivated += (_, _) => _log.Write(new { ev = "focus", on = false, t = Stopwatch.GetTimestamp() });
@@ -76,7 +77,15 @@ public sealed class InventoryWindow : Window
         });
     }
 
-    private void OnRendering(object? sender, EventArgs e) => _view.InvalidateVisual();
+    private long _lastTick;
+
+    private void OnRendering(object? sender, EventArgs e)
+    {
+        long now = Stopwatch.GetTimestamp();
+        if (_lastTick != 0) _scene.Tick((now - _lastTick) / (double)Stopwatch.Frequency);
+        _lastTick = now;
+        _view.InvalidateVisual();
+    }
 
     private Point Base(MouseEventArgs e)
     {
@@ -87,8 +96,18 @@ public sealed class InventoryWindow : Window
     private void OnMouse(MouseButtonEventArgs e, bool down)
     {
         long qpc = Stopwatch.GetTimestamp();
-        if (down) _scene.OnClick(Base(e), qpc);
-        else { var p = Base(e); _log.Write(new { ev = "mu", x = Math.Round(p.X, 1), y = Math.Round(p.Y, 1), t = qpc }); }
+        if (down)
+        {
+            // 列表里的按下先不算点击：可能是要拖动（2026-11-23）；抬起时没拖动才算点击
+            if (_scene.OnPress(Base(e), qpc)) _view.CaptureMouse();
+            else _scene.OnClick(Base(e), qpc);
+        }
+        else
+        {
+            var p = Base(e);
+            _log.Write(new { ev = "mu", x = Math.Round(p.X, 1), y = Math.Round(p.Y, 1), t = qpc });
+            if (_scene.OnRelease(qpc)) _view.ReleaseMouseCapture();
+        }
         _keyBalance["MouseLeft"] = _keyBalance.GetValueOrDefault("MouseLeft") + (down ? 1 : -1);
     }
 
@@ -116,7 +135,7 @@ public sealed class InventoryWindow : Window
         var summary = new
         {
             scene = "inventory", items = _scene.Items.Count, opened = _scene.OpenedSet.Count, opens = _scene.Opens,
-            catsVisited = _scene.CatsVisited.Count, clicks = _scene.Clicks, stray = _scene.Stray, wheels = _scene.Wheels,
+            catsVisited = _scene.CatsVisited.Count, clicks = _scene.Clicks, stray = _scene.Stray, wheels = _scene.Wheels, drags = _scene.Drags,
             notOpened = _scene.Items.Where(i => !_scene.OpenedSet.Contains((i.Cat, i.Idx))).Select(i => $"{InventoryScene.Categories[i.Cat]}#{i.Idx} {i.Name}").ToArray(),
             unbalancedKeys = _keyBalance.Where(kv => kv.Value != 0).ToDictionary(kv => kv.Key, kv => kv.Value)
         };

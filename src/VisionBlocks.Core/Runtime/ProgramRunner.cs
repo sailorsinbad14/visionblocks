@@ -43,8 +43,9 @@ public sealed class ProgramRunner : IDisposable
     private RegionDef? _cell;             // 「对每一格」循环里的当前格子（基准坐标）
     private Recorder? _rec;
     private readonly Dictionary<string, DistanceScroller> _scrollers = new();
+    private readonly Dictionary<string, DistanceDragger> _draggers = new();
 
-    public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Reads;
+    public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads;
     public int RowsRecorded => _rec?.Rows ?? 0;
     public int Duplicates => _rec?.Duplicates ?? 0;
     public int EmptyKeys => _rec?.EmptyKeys ?? 0;
@@ -78,7 +79,7 @@ public sealed class ProgramRunner : IDisposable
         finally
         {
             int released = _c.Input.ReleaseAll();
-            _c.Log.Write(new { ev = "runEnd", result, released, Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Reads, rows = RowsRecorded, dups = Duplicates, emptyKeys = EmptyKeys, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
+            _c.Log.Write(new { ev = "runEnd", result, released, Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads, rows = RowsRecorded, dups = Duplicates, emptyKeys = EmptyKeys, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
             _rec?.Dispose();
             try { Manifest?.Finish(status, RowsRecorded, Duplicates, EmptyKeys); }
             catch (Exception e) { _c.Log.Write(new { ev = "manifestFailed", error = e.Message, t = BotLog.Now }); }
@@ -95,7 +96,7 @@ public sealed class ProgramRunner : IDisposable
     private async Task WaitIfPaused(CancellationToken ct)
     {
         if (_c.IsPaused == null || !_c.IsPaused()) return;
-        _c.Input.ReleaseAll();
+        _c.Input.ReleaseAll();   // 拖到一半暂停时，输入后端已经先松开了左键，这里再兜一次底
         _c.Log.Write(new { ev = "paused", t = BotLog.Now });
         Publish("已暂停（Ctrl+Alt+F11 继续）");
         while (_c.IsPaused()) await Task.Delay(50, ct);
@@ -217,7 +218,8 @@ public sealed class ProgramRunner : IDisposable
                 {
                     ev = "wheelPx", want = dist, got = Math.Round(res.Moved, 1), steps = res.Steps,
                     perNotch = res.PerNotch is double pn ? Math.Round(pn, 1) : (double?)null, subNotch = res.SubNotch,
-                    end = res.End, reason = res.Reason, fails = res.MeasureFails, events = res.EventsSent, t = BotLog.Now
+                    end = res.End, reason = res.Reason, fails = res.MeasureFails, events = res.EventsSent,
+                    carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), t = BotLog.Now
                 });
                 Publish(res.Reason switch
                 {
@@ -236,6 +238,9 @@ public sealed class ProgramRunner : IDisposable
                 if (await _c.Input.WheelAsync(sx, sy, wb.Notches, 60, ct) > 0) Wheels++;
                 break;
             }
+            case DragBlock db:
+                await Drag(db, ct);
+                break;
             case ReadTextBlock rt:
             {
                 var f = await CurrentFrame(ct);
@@ -446,15 +451,84 @@ public sealed class ProgramRunner : IDisposable
         _c.Log.Write(new { ev = "clickConfirm", mode = cb.Confirm.ToString(), ok, ms = sw.ElapsedMilliseconds, bx, by, sx, sy, t = BotLog.Now });
     }
 
+    /// <summary>
+    /// 「拖动」积木（2026-11-23）：每个热区一个 DistanceDragger（记住比例、门槛和上一块还差的距离）。
+    /// 一笔的光标路径在基准坐标里算好，再换成屏幕物理像素交给输入后端；暂停在两笔之间等，拖到一半暂停时后端先松开。
+    /// </summary>
+    private async Task Drag(DragBlock db, CancellationToken ct)
+    {
+        var roi = Region(db.Region);
+        int dist = db.DistancePx;
+        Publish($"拖动 {dist} px");
+        if (!_draggers.TryGetValue(db.Region, out var dragger))
+            _draggers[db.Region] = dragger = new DistanceDragger { Log = o => _c.Log.Write(o) };
+        dragger.Progress = (moved, strokes) => SetBox("drag:" + db.Region, ScrollArrow(roi, dist, moved, strokes, null, "拖动"));
+        int speed = db.SpeedPxPerSec ?? DragBlock.DefaultSpeed, hold = db.HoldBeforeUpMs ?? DragBlock.DefaultHoldMs;
+        var h = _c.Input.Humanizer;
+        var io = new DistanceDragger.Io(
+            Drag: async (legs, c) =>
+            {
+                var (bx, _) = Inside(roi);
+                var (x0, y0, pts) = DistanceDragger.PathFor(legs, roi.X, roi.Y, roi.H, bx, speed, h);
+                if (!ToScreen((int)Math.Round(x0), (int)Math.Round(y0), out int sx, out int sy)) return SendInputBackend.DragOutcome.Blocked;
+                var path = new List<(int, int, int)>(pts.Count);
+                foreach (var (x, y, d) in pts)
+                {
+                    if (!ToScreenD(x, y, out int px, out int py)) return SendInputBackend.DragOutcome.Blocked;
+                    path.Add((px, py, d));
+                }
+                int pressHold = h?.Hold(80) ?? 80, upHold = h != null ? h.Hold(Math.Max(10, hold)) : hold;
+                return await _c.Input.DragAsync(sx, sy, path, pressHold, upHold, () => _c.IsPaused?.Invoke() == true, c);
+            },
+            Grab: async c =>
+            {
+                await WaitNextFrame(c, 100);
+                var f = await CurrentFrame(c);
+                return (new Mat(f.Gray, f.ToPixels(roi)).Clone(), f.K);
+            },
+            Delay: (ms, c) => Task.Delay(ms, c),
+            NowMs: () => Environment.TickCount64,
+            WaitWhilePaused: WaitIfPaused);
+        var res = await dragger.RunAsync(dist, db.TolerancePx ?? DragBlock.DefaultTolerancePx, roi.H, io, ct);
+        if (res.Strokes > 0) Drags++;
+        _c.Log.Write(new
+        {
+            ev = "dragPx", want = dist, got = Math.Round(res.Moved, 1), strokes = res.Strokes,
+            gain = res.Gain is double g ? Math.Round(g, 3) : (double?)null, threshold = res.Threshold is double t ? Math.Round(t, 1) : (double?)null,
+            end = res.End, reason = res.Reason, fails = res.MeasureFails, carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), t = BotLog.Now
+        });
+        Publish(res.Reason switch
+        {
+            "end" => $"拖动：到底了，拖了 {res.Moved:0} / {dist} px",
+            "cantMeasure" => "拖动：量不出画面移动，停下",
+            "userMouse" => "拖动：鼠标被移动了，已松开并停下这一块",
+            "blocked" => "拖动：输入被拦，已松开",
+            _ => $"拖动 {res.Moved:0} / {dist} px"
+        });
+    }
+
+    /// <summary>基准坐标（可带小数）→ 屏幕物理像素。</summary>
+    private bool ToScreenD(double bx, double by, out int sx, out int sy)
+    {
+        sx = sy = 0;
+        if (!WindowInfo.TryGetClientOnScreen(_c.TargetHwnd, out var client)) return false;
+        double s = client.W / (double)_c.Program.Base.W;
+        sx = client.X + (int)Math.Round(bx * s);
+        sy = client.Y + (int)Math.Round(by * s);
+        return true;
+    }
+
     /// <summary>遮罩上的滚动箭头：从热区竖直中线、靠右处出发，按实际滚过的距离画（最多画到热区边上），标「目标 · 已滚 · 步 · 每格」。</summary>
-    private static OverlayBox ScrollArrow(RegionDef roi, int dist, double moved, int steps, double? perNotch)
+    private static OverlayBox ScrollArrow(RegionDef roi, int dist, double moved, int steps, double? perNotch, string? verb = null)
     {
         int x = roi.X + roi.W - Math.Min(60, roi.W / 4), cy = roi.Y + roi.H / 2;
         int len = (int)Math.Round(Math.Min(Math.Abs(moved), roi.H / 2.0 - 10));
         var box = moved >= 0
             ? new RegionDef { X = x, Y = cy - len, W = 0, H = len }   // 向下滚：内容往上走，箭头朝上
             : new RegionDef { X = x, Y = cy, W = 0, H = len };
-        string label = $"目标 {dist} · 已滚 {moved:0} px · {steps} 步" + (perNotch is double pn ? $" · 每格 {pn:0}" : "");
+        string label = verb == "拖动"
+            ? $"拖动 目标 {dist} · 已拖 {moved:0} px · 第 {steps} 笔"
+            : $"目标 {dist} · 已滚 {moved:0} px · {steps} 步" + (perNotch is double pn ? $" · 每格 {pn:0}" : "");
         return new OverlayBox(box, label, moved >= 0 ? "scrollUp" : "scrollDown");
     }
 

@@ -170,6 +170,20 @@ How exact it gets depends on the target program:
 
 Which kind your software is, you can only tell by running it once and reading the log. Scrolling by distance waits for the picture to settle after each step, so it is a little slower than notches (about 0.2–0.5 s per step). If one notch moves more than a little over half the region's height, it can't keep track (about 500 px for an 870-tall region), so make the region as tall as you can.
 
+When several Wheel blocks scroll the same region in a row, whatever the previous one fell short by is added to the next (`carryIn`, `carryOut` in the log), so whole-notch programs don't drift further with every block. It resets at the end of the list, or when a block can't measure or is blocked.
+
+### 5.2 The wheel won't stop where you want: use Drag
+
+Some lists can be dragged with the mouse held down, which stops more precisely than the wheel. The **Drag** block under Actions presses inside a region, drags and releases, measures how far the picture moved, and adds another stroke if it is short.
+
+1. **Drag in region**: as with distance scrolling, the region should sit inside the moving content.
+2. **Distance px**: positive = page down (content moves up, the mouse drags up), the same direction as the wheel, in base coordinates. Properties shows whether it lines up with the grid's row pitch; the frozen frame shows the first stroke and where the cells end up.
+3. **Speed** (800 px/s by default) and **Pause before release** (150 ms by default): if the list keeps sliding after you let go, make the pause longer; if a fast drag is taken as a flick, slow it down.
+4. One stroke is at most about 45% of the region's height; longer distances take several strokes. The first stroke measures how far the picture moves per dragged pixel (1 for dragging the list itself, more for a scroll bar) and how far the mouse must move before dragging starts; the same region reuses both. When what is left is too short to get past that threshold, one press first drags a little the other way and then back. The log has `dragPx` (per block) and `dragStroke` (per stroke).
+5. Safety: every step while the button is held checks the foreground window and e-stop. Blocked, paused, e-stopped, or you moved the mouse (more than 3 px from where it was sent): the button is released at once. A drag paused halfway is measured again and continued after you resume.
+
+Drag also carries the previous block's shortfall to the next one on the same region. The practice target's inventory can now be dragged: dragging starts after the mouse moves 10 px vertically, and an item opens only on a release without dragging. Launch options `--drag-threshold` (0 turns dragging off), `--drag-ratio` (list pixels per dragged pixel) and `--drag-inertia` (keeps sliding after release) imitate different programs.
+
 ## 6. Settings
 
 | Setting | What it does |

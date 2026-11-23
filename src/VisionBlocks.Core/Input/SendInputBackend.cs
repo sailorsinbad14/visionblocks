@@ -307,6 +307,70 @@ public sealed class SendInputBackend : IDisposable
         return sent;
     }
 
+    /// <summary>拖动一笔的结果。除了 Ok，其余都已经松开了左键。</summary>
+    public enum DragOutcome { Ok, Blocked, UserMouse, Paused, Aborted }
+
+    /// <summary>
+    /// 按住左键拖一笔（2026-11-23，「拖动」积木）：先移到 (sx, sy)（开了移动轨迹就沿轨迹过去），按下，停 pressHoldMs，
+    /// 沿 path 一步步移（屏幕物理像素，每步带「移之前先等多少毫秒」），停 releaseHoldMs，松开。
+    /// 每一步都过闸（急停、修饰键、前台守卫），还要看光标是不是还在我们上一次发的位置：差了 3 像素以上 = 用户动了鼠标。
+    /// 有一步不行、要暂停（isPaused）、被取消或出错，都立刻松开左键；急停时 Abort 已经在锁里抬起了左键，不会再发第二次。
+    /// </summary>
+    public async Task<DragOutcome> DragAsync(int sx, int sy, IReadOnlyList<(int X, int Y, int DelayMs)> path, int pressHoldMs, int releaseHoldMs, Func<bool>? isPaused, CancellationToken ct)
+    {
+        var (ax, ay) = ToAbsolute(sx, sy);
+        var abs = MOUSE_EVENT_FLAGS.MOUSEEVENTF_MOVE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_ABSOLUTE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_VIRTUALDESK;
+        await WaitModifiersReleased(ct);
+        if (!await ApproachAsync(sx, sy, ct)) return _aborted ? DragOutcome.Aborted : DragOutcome.Blocked;
+        lock (_lock)
+        {
+            if (!Gate($"dragdown {sx},{sy}")) return _aborted ? DragOutcome.Aborted : DragOutcome.Blocked;
+            Send(new[] { MouseInput(ax, ay, abs) }, "move");
+            Send(new[] { MouseInput(ax, ay, abs | MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN) }, "md");
+            _leftDown = true;
+            _log?.Write(new { ev = "mousedown", x = sx, y = sy, drag = true, t = BotLog.Now });
+        }
+        (int X, int Y) last = (sx, sy);
+        bool Moved() { var c = CursorPosition(); return Math.Abs(c.X - last.X) > 3 || Math.Abs(c.Y - last.Y) > 3; }
+        var outcome = DragOutcome.Ok;
+        try
+        {
+            await Task.Delay(Math.Clamp(pressHoldMs, 0, 2000), ct);
+            foreach (var (x, y, delay) in path)
+            {
+                if (delay > 0) await Task.Delay(delay, ct);
+                if (isPaused?.Invoke() == true) { outcome = DragOutcome.Paused; break; }
+                if (Moved()) { outcome = DragOutcome.UserMouse; break; }
+                lock (_lock)
+                {
+                    if (!Gate($"drag {x},{y}")) { outcome = _aborted ? DragOutcome.Aborted : DragOutcome.Blocked; break; }
+                    var (mx, my) = ToAbsolute(x, y);
+                    Send(new[] { MouseInput(mx, my, abs) }, $"dm {x},{y}");
+                    last = (x, y);
+                }
+            }
+            if (outcome == DragOutcome.Ok)
+            {
+                await Task.Delay(Math.Clamp(releaseHoldMs, 0, 2000), ct);
+                if (Moved()) outcome = DragOutcome.UserMouse;
+            }
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                if (_leftDown)
+                {
+                    Send(new[] { MouseInput(0, 0, MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTUP) }, "mu");
+                    _leftDown = false;
+                    _log?.Write(new { ev = "mouseup", drag = true, outcome = outcome.ToString(), t = BotLog.Now });
+                }
+            }
+        }
+        if (outcome != DragOutcome.Ok) _log?.Write(new { ev = "dragStopped", outcome = outcome.ToString(), at = new[] { last.X, last.Y }, t = BotLog.Now });
+        return outcome;
+    }
+
     /// <summary>Unicode 方式输入文字（T2 用；游戏里通常不认，桌面软件可以）。</summary>
     public bool TypeText(string text)
     {

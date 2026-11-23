@@ -28,6 +28,7 @@ public sealed partial class MainWindow
         _canvas.TestBox = null;
         _canvas.TestRoi = null;
         _canvas.ScrollPreview = null;
+        _canvas.DragPreview = null;
         switch (_selected)
         {
             case Block b: BlockProps(b); break;
@@ -141,7 +142,7 @@ public sealed partial class MainWindow
         {
             RepeatUntilBlock => "重复直到…", RepeatBlock => "重复 N 次", IfBlock => "如果…", WaitUntilBlock => "等到…",
             WaitBlock => "等待", KeyBlock => "按键", ClickBlock => "点击", TypeTextBlock => "输入文字", StopBlock => "停止",
-            ForEachCellBlock => "对每一格", UntilNoNewRowsBlock => "重复直到没有新记录", WheelBlock => "滚轮",
+            ForEachCellBlock => "对每一格", UntilNoNewRowsBlock => "重复直到没有新记录", WheelBlock => "滚轮", DragBlock => "拖动",
             ReadTextBlock => "读文字", SaveImageBlock => "截图存图", RecordRowBlock => "记录一行", _ => b.GetType().Name
         };
         PTitle(L.Z("积木 · ") + L.Z(kind), BlockText.CategoryOf(b) switch { BlockText.Category.Flow => Ui.FlowFg, BlockText.Category.Sense => Ui.SenseFg, _ => Ui.ActFg });
@@ -257,6 +258,25 @@ public sealed partial class MainWindow
                 Note("热区要框在会滚动的内容里面，别框进不动的标题、边框和滚动条。截图上的橙色箭头和白色虚线格子是推算的滚动结果；实际滚了多少，运行时看遮罩上的「目标 · 已滚」。");
                 if (wb.Region != null && _ed.Program.Regions.ContainsKey(wb.Region)) _canvas.HighlightRegion = wb.Region;
                 _canvas.ScrollPreview = wb;
+                break;
+            }
+            case DragBlock db:
+            {
+                // 2026-11-23：按住拖动，边拖边量；提示行和截图预览沿用滚轮「按距离」那一套
+                Row("在哪个热区拖", Combo(RegionChoices(), db.Region, s => { db.Region = s; Dispatcher.BeginInvoke(ShowProps); }), "pDragRegion");
+                var hint = Ui.Label(WheelPreview.Hint(_ed.Program, db.Region, db.DistancePx, "拖"), 12);
+                AutomationProperties.SetAutomationId(hint, "pDragHint");
+                Row("距离 px（正数向下翻）", Num(db.DistancePx, v => { db.DistancePx = (int)v == 0 ? 1 : (int)v; hint.Text = WheelPreview.Hint(_ed.Program, db.Region, db.DistancePx, "拖"); }, -20000, 20000), "pDragDistance");
+                hint.Margin = new Thickness(0, -4, 0, 10);
+                _props.Children.Add(hint);
+                Row("容差 px", Num(db.TolerancePx ?? DragBlock.DefaultTolerancePx, v => db.TolerancePx = (int)v == DragBlock.DefaultTolerancePx ? null : (int)v, 1, 100), "pDragTolerance");
+                Row("速度 px/秒", Num(db.SpeedPxPerSec ?? DragBlock.DefaultSpeed, v => db.SpeedPxPerSec = (int)v == DragBlock.DefaultSpeed ? null : (int)v, 50, 5000), "pDragSpeed");
+                Row("松手前停顿 ms", Num(db.HoldBeforeUpMs ?? DragBlock.DefaultHoldMs, v => db.HoldBeforeUpMs = (int)v == DragBlock.DefaultHoldMs ? null : (int)v, 0, 2000), "pDragHold");
+                Note("在热区里按住鼠标拖动，拖完量一下画面移了多少，差多少再补一笔，直到差在容差以内。正数向下翻（内容往上走，鼠标往上拖），和滚轮一样。距离按基准像素（1920×1080）算。");
+                Note("一笔最长约为热区高度的 45%，再长就分几笔。第一笔会量出「拖 1 px 画面动几 px」和按下后要移过多少才开始拖，之后接着用。拖了画面不动就当作到底了。同一个热区上一块还差的几 px 会加到下一块里，连拖几块也不会越差越多。");
+                Note("列表松手后会自己滑一段的，把「松手前停顿」调长一点；拖得太快被当成甩动的，把速度调慢。热区要框在会动的内容里，别框进不动的标题、边框和滚动条。");
+                if (_ed.Program.Regions.ContainsKey(db.Region)) _canvas.HighlightRegion = db.Region;
+                _canvas.DragPreview = db;
                 break;
             }
             case ReadTextBlock rt:

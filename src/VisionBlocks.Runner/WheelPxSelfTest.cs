@@ -128,7 +128,7 @@ public static class WheelPxSelfTest
     }
 
     /// <summary>假背包内容（基准像素，1440 宽）：每格 300×200、行距 240，格子里画不同的形状和数字；periodic = 每格一模一样。flat = 一片灰。</summary>
-    private static Mat Content(int height, bool periodic = false, bool flat = false)
+    internal static Mat Content(int height, bool periodic = false, bool flat = false)
     {
         var m = new Mat(height, 1440, MatType.CV_8UC1, Scalar.All(flat ? 90 : 34));
         if (flat) return m;
@@ -198,14 +198,15 @@ public static class WheelPxSelfTest
             Check(c.Name, ok, $"真实 {truth:0.0}，自测 {res.Moved:0.0}，{res.Steps} 步，事件 {app.Events}（零头 {app.FracEvents}），每格 {res.PerNotch:0.0}，认零头 {res.SubNotch?.ToString() ?? "-"}，{res.Reason}");
         }
 
-        // 记住「不认零头」：同一个 DistanceScroller 再滚一次，不再发零头
+        // 记住「不认零头」：同一个 DistanceScroller 再滚一次，不再发零头。
+        // 2026-11-23 起上一块还差的 40 会带进来：第二次目标 280，只认整格时停在最近的 300
         using (var app1 = new FakeApp(content, 1, 870, 0) { Mode = Mode.Accumulate, Step = 100 })
         {
             var sc = new DistanceScroller();
             sc.RunAsync(240, 3, app1.Io(), CancellationToken.None).GetAwaiter().GetResult();
             using var app2 = new FakeApp(content, 1, 870, 0) { Mode = Mode.Accumulate, Step = 100 };
             var res = sc.RunAsync(240, 3, app2.Io(), CancellationToken.None).GetAwaiter().GetResult();
-            Check("第二次滚不再试零头", app2.FracEvents == 0 && Math.Abs(res.Moved - app2.Target) <= 2 && app2.Target == 200, $"零头事件 {app2.FracEvents}，真实 {app2.Target:0}，自测 {res.Moved:0}，{res.Reason}");
+            Check("第二次滚不再试零头", app2.FracEvents == 0 && Math.Abs(res.Moved - app2.Target) <= 2 && app2.Target == 300 && Math.Abs(res.CarryIn - 40) <= 2, $"零头事件 {app2.FracEvents}，带入 {res.CarryIn:0}，真实 {app2.Target:0}，自测 {res.Moved:0}，{res.Reason}");
         }
 
         // 记住「每格多少像素」：第二块比一格还短（-100，一格 170），第一步就直接发零头，不先滚一整格（2026-11-22 真靶子上发现过冲到 -170）

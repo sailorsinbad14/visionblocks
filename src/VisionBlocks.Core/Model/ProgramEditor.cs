@@ -133,6 +133,7 @@ public sealed class ProgramEditor
                 case WheelBlock wb:
                     if ((kind == "point" && wb.Point == name) || (kind == "region" && wb.Region == name)) uses.Add(BlockText.Summary(b, Program));
                     break;
+                case DragBlock db when kind == "region" && db.Region == name:
                 case ReadTextBlock rt when kind == "region" && rt.Region == name:
                 case SaveImageBlock si when kind == "region" && si.Region == name:
                 case ForEachCellBlock fe when kind == "grid" && fe.Grid == name:
@@ -216,6 +217,7 @@ public sealed class ProgramEditor
             "forEachCell" => new ForEachCellBlock { Grid = Program.Grids.Keys.FirstOrDefault() ?? "" },
             "untilNoNewRows" => new UntilNoNewRowsBlock { MaxTimes = 10 },
             "wheel" => new WheelBlock { Region = region, Notches = 1 },
+            "drag" => new DragBlock { Region = region, DistancePx = 240 },
             "readText" => new ReadTextBlock { Region = region, Field = "名称" },
             "saveImage" => new SaveImageBlock { Region = region, Field = "图片" },
             "recordRow" => new RecordRowBlock(),

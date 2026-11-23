@@ -21,7 +21,9 @@ public sealed class DistanceScroller
 
     /// <param name="Moved">实际滚了多少基准像素（带方向，正 = 向下）。</param>
     /// <param name="Reason">done 到了 / end 到底了 / nearestNotch 只认整格、停在最近的整格 / cantMeasure 量不出 / blocked 输入被拦 / maxSteps。</param>
-    public sealed record Result(double Moved, int Steps, double? PerNotch, bool? SubNotch, bool End, string Reason, int MeasureFails, int EventsSent);
+    /// <param name="CarryIn">这一块开始时加上的、上一块还差的距离（2026-11-23）。</param>
+    /// <param name="CarryOut">这一块停下时还差的，留给同一个热区的下一块。</param>
+    public sealed record Result(double Moved, int Steps, double? PerNotch, bool? SubNotch, bool End, string Reason, int MeasureFails, int EventsSent, double CarryIn = 0, double CarryOut = 0);
 
     public const int MinWaitMs = 120, QuietMs = 500, SettleMaxMs = 1500, MaxSteps = 40;
 
@@ -32,11 +34,25 @@ public sealed class DistanceScroller
     /// <summary>每步之后：已滚（带方向）、步数、每格多少像素。</summary>
     public Action<double, int, double?>? Progress { get; set; }
     public Action<object>? Log { get; set; }
+    /// <summary>
+    /// 上一块停下时还差的距离（带方向，正 = 向下），2026-11-23 加：每块各自停在容差内（只认整格的程序最多差半格），
+    /// 不带给下一块的话，连滚几块误差会越积越多。只在「到了 / 只认整格 / 滚过头」时记下；到底、量不出、被拦时清零。
+    /// </summary>
+    public double Carry { get; set; }
 
     public async Task<Result> RunAsync(int distancePx, int tolerancePx, Io io, CancellationToken ct)
     {
-        int dir = Math.Sign(distancePx);
-        double goal = Math.Abs(distancePx), tol = Math.Max(1, tolerancePx);
+        double carryIn = Carry;
+        Carry = 0;
+        double target = distancePx + carryIn;
+        double tol = Math.Max(1, tolerancePx);
+        if (Math.Abs(target) <= tol)
+        {
+            Carry = target;
+            return new Result(0, 0, PerNotchHint, SubNotchOk, false, "done", 0, 0, carryIn, Carry);
+        }
+        int dir = Math.Sign(target);
+        double goal = Math.Abs(target);
         var (prev, k) = await Settle(io, io.NowMs() - MinWaitMs, ct);
         double maxStep = 0.8 * ScrollMeter.MaxTrack(prev.Rows, dir) / k;
         double moved = 0, pxSum = 0;
@@ -49,7 +65,7 @@ public sealed class DistanceScroller
             if (!ScrollMeter.HasTexture(prev, dir))
             {
                 Log?.Invoke(new { ev = "wheelStep", step = 0, ok = false, why = "热区里画面太平，量不出移动，没有滚" });
-                return new Result(0, 0, null, SubNotchOk, false, "cantMeasure", 0, 0);
+                return new Result(0, 0, null, SubNotchOk, false, "cantMeasure", 0, 0, carryIn, 0);
             }
             while (true)
             {
@@ -164,7 +180,8 @@ public sealed class DistanceScroller
         finally { prev.Dispose(); }
         // 碰到底的那一块，如果只量过一步，那一步可能就被截短了，不拿去给下一块用
         if (!end || learned >= 2) PerNotchHint = perNotch ?? PerNotchHint;
-        return new Result(moved * dir, steps, perNotch, SubNotchOk, end, reason, fails, events);
+        Carry = reason is "done" or "nearestNotch" or "overshoot" ? (goal - moved) * dir : 0;
+        return new Result(moved * dir, steps, perNotch, SubNotchOk, end, reason, fails, events, carryIn, Carry);
     }
 
     /// <summary>等画面停稳再量。量出来几乎没动、而离发送还不到 QuietMs 时，再多等一会儿重量一次（慢的、带动画的程序会晚一点才开始动）。</summary>
@@ -186,18 +203,21 @@ public sealed class DistanceScroller
     }
 
     /// <summary>连续两帧几乎一样、且离发送至少 MinWaitMs，算停稳；最多等 SettleMaxMs。</summary>
-    private static async Task<(Mat Gray, double K)> Settle(Io io, long sentAt, CancellationToken ct)
+    private static Task<(Mat Gray, double K)> Settle(Io io, long sentAt, CancellationToken ct) => Settle(io.Grab, io.Delay, io.NowMs, sentAt, ct);
+
+    /// <summary>同上，「拖动」积木也用（2026-11-23）。</summary>
+    internal static async Task<(Mat Gray, double K)> Settle(Func<CancellationToken, Task<(Mat Gray, double K)>> grab, Func<int, CancellationToken, Task> delay, Func<long> now, long sentAt, CancellationToken ct)
     {
         Mat? last = null;
         while (true)
         {
-            var (g, k) = await io.Grab(ct);
-            long since = io.NowMs() - sentAt;
+            var (g, k) = await grab(ct);
+            long since = now() - sentAt;
             if (last != null && since >= MinWaitMs && Same(last, g)) { last.Dispose(); return (g, k); }
             last?.Dispose();
             last = g;
             if (since >= SettleMaxMs) return (g, k);
-            await io.Delay(40, ct);
+            await delay(40, ct);
         }
     }
 

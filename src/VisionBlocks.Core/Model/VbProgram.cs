@@ -102,6 +102,7 @@ public sealed class ColorDef
 [JsonDerivedType(typeof(ForEachCellBlock), "forEachCell")]
 [JsonDerivedType(typeof(UntilNoNewRowsBlock), "untilNoNewRows")]
 [JsonDerivedType(typeof(WheelBlock), "wheel")]
+[JsonDerivedType(typeof(DragBlock), "drag")]
 [JsonDerivedType(typeof(ReadTextBlock), "readText")]
 [JsonDerivedType(typeof(SaveImageBlock), "saveImage")]
 [JsonDerivedType(typeof(RecordRowBlock), "recordRow")]
@@ -204,6 +205,23 @@ public sealed class WheelBlock : Block
     /// <summary>按距离滚时差多少以内算到了（基准像素）；空 = 3。</summary>
     public int? TolerancePx { get; set; }
     public const int DefaultTolerancePx = 3;
+}
+
+/// <summary>
+/// 按住鼠标拖动（2026-11-23）：在热区里按下、拖、松开，边拖边量画面，直到内容移动了 DistancePx 基准像素。
+/// 方向和滚轮「按距离滚」一样：正数 = 向下翻（内容往上走，鼠标往上拖）。距离长时分几笔拖；一笔拖完量一次，差多少再补。
+/// </summary>
+public sealed class DragBlock : Block
+{
+    public string Region { get; set; } = "";
+    public int DistancePx { get; set; } = 240;
+    /// <summary>差多少以内算到了（基准像素）；空 = 3。</summary>
+    public int? TolerancePx { get; set; }
+    /// <summary>拖动速度（基准像素 / 秒）；空 = 800。</summary>
+    public int? SpeedPxPerSec { get; set; }
+    /// <summary>拖到终点后停多久再松开（毫秒），让有惯性的列表先停住；空 = 150。</summary>
+    public int? HoldBeforeUpMs { get; set; }
+    public const int DefaultTolerancePx = 3, DefaultSpeed = 800, DefaultHoldMs = 150;
 }
 
 /// <summary>识别热区里的文字，存进当前这一行的某个字段。</summary>

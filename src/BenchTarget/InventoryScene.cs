@@ -50,16 +50,19 @@ public sealed class InventoryScene
     public Item? Open { get; private set; }
     public int ScrollStep { get; }
 
-    public int Clicks, Stray, Wheels, Opens;
+    public int Clicks, Stray, Wheels, Opens, Drags;
     public readonly HashSet<(int, int)> OpenedSet = new();
     public readonly HashSet<int> CatsVisited = new() { 0 };
 
     private readonly TruthLog _log;
+    private readonly double _dragThreshold, _dragRatio;
+    private readonly bool _dragInertia;
 
     public InventoryScene(TargetOptions opt, TruthLog log)
     {
         _log = log;
         ScrollStep = opt.ScrollStep > 0 ? opt.ScrollStep : (int)PitchY;
+        _dragThreshold = opt.DragThreshold; _dragRatio = opt.DragRatio; _dragInertia = opt.DragInertia;
         var rng = new Random(opt.Seed);
         for (int c = 0; c < Categories.Length; c++)
         {
@@ -73,7 +76,7 @@ public sealed class InventoryScene
         }
         _log.Write(new
         {
-            ev = "items", scrollStep = ScrollStep,
+            ev = "items", scrollStep = ScrollStep, dragThreshold = _dragThreshold, dragRatio = _dragRatio, dragInertia = _dragInertia,
             items = Items.Select(it => new { cat = Categories[it.Cat], idx = it.Idx, name = it.Name, stock = it.Stock, prices = it.Prices, vols = it.Vols, shape = it.Shape, color = it.Color })
         });
         if (opt.OpenItem >= 0) Open = InCategory(0).ElementAtOrDefault(opt.OpenItem);
@@ -130,6 +133,70 @@ public sealed class InventoryScene
     }
 
     public void OnEsc(long qpc) { if (Open != null) Close("esc", qpc); }
+
+    // ── 按住拖动（2026-11-23）──
+    private bool _pressed, _dragging;
+    private Point _pressAt;
+    private double _dragStartY, _dragStartOffset, _vel, _inertiaV, _lastOffset;
+
+    /// <summary>按下：开了拖动、详情页没开、按在列表视口里时先记下来，等移动或抬起再决定是拖动还是点击。返回 true = 这一下先不当点击。</summary>
+    public bool OnPress(Point p, long qpc)
+    {
+        if (_dragThreshold <= 0 || Open != null || !Viewport.Contains(p)) return false;
+        _pressed = true; _dragging = false; _pressAt = p; _vel = 0; _inertiaV = 0;
+        _log.Write(new { ev = "press", x = Math.Round(p.X, 1), y = Math.Round(p.Y, 1), t = qpc });
+        return true;
+    }
+
+    /// <summary>按住移动：竖着移过门槛才开始拖（从过门槛的那一点算起，门槛这一段不算），之后列表跟着鼠标走（乘 DragRatio）。</summary>
+    public void OnMove(Point p, long qpc)
+    {
+        if (!_pressed) return;
+        if (!_dragging)
+        {
+            if (Math.Abs(p.Y - _pressAt.Y) < _dragThreshold) return;
+            _dragging = true; _dragStartY = p.Y; _dragStartOffset = Offset; Drags++;
+            _log.Write(new { ev = "dragBegin", y = Math.Round(p.Y, 1), from = Offset, t = qpc });
+        }
+        Offset = Math.Clamp(_dragStartOffset + _dragRatio * (_dragStartY - p.Y), 0, MaxOffset);
+    }
+
+    /// <summary>抬起：拖过了就结束拖动（开了惯性就按松手时的速度再滑一段）；没拖动就算一次点击，按下的位置为准（点开物品的时机从按下改到了这里）。</summary>
+    public bool OnRelease(long qpc)
+    {
+        if (!_pressed) return false;
+        _pressed = false;
+        if (_dragging)
+        {
+            _dragging = false;
+            if (_dragInertia) _inertiaV = _vel;
+            _log.Write(new { ev = "dragEnd", offset = Offset, inertia = Math.Round(_inertiaV, 1), t = qpc });
+            return true;
+        }
+        OnClick(_pressAt, qpc);
+        return true;
+    }
+
+    /// <summary>每帧调用：拖动时跟踪速度（按帧平滑，停住不动时速度慢慢降下来）；惯性滑动时每秒剩 13.5%，到头或速度很小就停。</summary>
+    public void Tick(double dt)
+    {
+        if (dt > 0 && dt < 0.25)
+        {
+            if (_dragging) _vel += ((Offset - _lastOffset) / dt - _vel) * Math.Min(1, dt * 10);
+            else if (_inertiaV != 0)
+            {
+                double before = Offset;
+                Offset = Math.Clamp(Offset + _inertiaV * dt, 0, MaxOffset);
+                _inertiaV *= Math.Pow(0.135, dt);
+                if (Math.Abs(_inertiaV) < 1 || Offset == before)
+                {
+                    _inertiaV = 0;
+                    _log.Write(new { ev = "inertiaEnd", offset = Offset, t = Stopwatch.GetTimestamp() });
+                }
+            }
+        }
+        _lastOffset = Offset;
+    }
 
     private void Close(string how, long qpc)
     {

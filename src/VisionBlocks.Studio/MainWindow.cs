@@ -505,7 +505,7 @@ public sealed partial class MainWindow : Window
             ("forEachCell", "对每一格"), ("untilNoNewRows", "重复直到没有新记录") }, Ui.FlowFg);
         Group("grpSense", new[] { ("cond:image", "看到图像"), ("cond:color", "颜色占比"), ("cond:text", "文字包含") }, Ui.SenseFg);
         Group("grpRecord", new[] { ("readText", "读文字"), ("saveImage", "截图存图"), ("recordRow", "记录一行") }, Ui.SenseFg);
-        Group("grpAct", new[] { ("click", "点击"), ("key", "按键"), ("typeText", "输入文字"), ("wait", "等待"), ("wheel", "滚轮") }, Ui.ActFg);
+        Group("grpAct", new[] { ("click", "点击"), ("key", "按键"), ("typeText", "输入文字"), ("wait", "等待"), ("wheel", "滚轮"), ("drag", "拖动") }, Ui.ActFg);
         sp.Children.Add(Txt("palHint", 11.5, "Text3"));
         return new Border
         {

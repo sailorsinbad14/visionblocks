@@ -50,6 +50,11 @@ public sealed class Humanizer
     public int BeforeAction() => Timing ? (int)Math.Round(Range(30, 120)) : 0;
     public int Wait(int ms) => Timing ? Math.Max(0, (int)Math.Round(ms * Range(0.8, 1.2))) : ms;
 
+    /// <summary>「拖动」积木的速度 ×0.8–1.2（2026-11-23，开了「位置和时机」时）。</summary>
+    public int DragSpeed(int pxPerSec) => Timing ? Math.Max(20, (int)Math.Round(pxPerSec * Range(0.8, 1.2))) : pxPerSec;
+    /// <summary>「拖动」路径上每一步的横向抖动（开了「移动轨迹」时 ±0.5 基准像素）。</summary>
+    public double DragJitter() => Path ? Range(-0.5, 0.5) : 0;
+
     /// <summary>
     /// 从 from 移到 to 的轨迹（屏幕物理像素），每个点带「移到这里之前先等多少毫秒」。最后一个点一定是 to（to 本身也夹在 clamp 里）。
     /// </summary>

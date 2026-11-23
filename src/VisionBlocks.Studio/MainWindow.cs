@@ -66,6 +66,11 @@ public sealed partial class MainWindow : Window
     private Block? _treeDragBlock;
     private readonly Canvas _dropLayer = new() { IsHitTestVisible = false };
     private ScrollViewer? _treeSv;
+    // 2026-11-23：作用域提示：树上方的位置条、钉在树顶的外层作用域
+    private readonly TextBlock _scopeText = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Border _scopeBar = new() { Padding = new Thickness(16, 5, 12, 5) };
+    private readonly StackPanel _sticky = new() { VerticalAlignment = VerticalAlignment.Top, AllowDrop = false };
+    private static readonly Brush ScopeHi = Ui.Hex("#8F4300");
 
     // 改版新增
     private readonly ResourceDictionary _theme = Ui.Theme;
@@ -596,7 +601,21 @@ public sealed partial class MainWindow : Window
         body.ColumnDefinitions.Add(_shelfCol = new ColumnDefinition { Width = new GridLength(196) });
         body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         body.Children.Add(BuildPalette());
-        var treeHost = new Border { CornerRadius = new CornerRadius(0, 0, 16, 0), ClipToBounds = true, Child = new Grid { Children = { _tree, _dropLayer } } };
+        // 位置条和钉顶层都是程序树的兄弟控件，不放进树里（ui.ps1 读树里的全部文字）
+        _scopeBar.Child = _scopeText;
+        // WPF 的 Border / StackPanel 不进 UI 自动化树，id 放在里面的文字上：位置条 scopeBar，钉顶的每一行 stickyScope
+        AutomationProperties.SetAutomationId(_scopeText, "scopeBar");
+        var treeArea = new Grid { Children = { _tree, _dropLayer, _sticky } };
+        var treeDock = new DockPanel();
+        DockPanel.SetDock(_scopeBar, Dock.Top);
+        treeDock.Children.Add(_scopeBar);
+        treeDock.Children.Add(treeArea);
+        _tree.Loaded += (_, _) =>
+        {
+            _treeSv ??= FindChild<ScrollViewer>(_tree);
+            if (_treeSv != null) _treeSv.ScrollChanged += (_, _) => UpdateSticky();
+        };
+        var treeHost = new Border { CornerRadius = new CornerRadius(0, 0, 16, 0), ClipToBounds = true, Child = treeDock };
         Grid.SetColumn(treeHost, 1);
         body.Children.Add(treeHost);
 
@@ -843,6 +862,8 @@ public sealed partial class MainWindow : Window
             _treeSv ??= FindChild<ScrollViewer>(_tree);
             _treeSv?.ScrollToVerticalOffset(keep);
             toSelect?.BringIntoView();
+            ApplyScopeHighlight();
+            UpdateSticky();
         });
     }
 
@@ -878,6 +899,7 @@ public sealed partial class MainWindow : Window
             }
         }
         Walk(_tree.Items);
+        ApplyScopeHighlight();
         UpdateTitle();
     }
 
@@ -1154,6 +1176,7 @@ public sealed partial class MainWindow : Window
     {
         _dropLayer.Children.Clear();
         if (drop is not { } d) return;
+        SetScopeBar(L.T("scopeDrop") + SlotText(d.List, d.Index) + (ok ? "" : " · " + L.T("scopeNoSelf")), true);
         var brush = ok ? R("Ink") : Ui.Bad;
         var line = new System.Windows.Shapes.Rectangle { Width = d.LineW, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = brush };
         Canvas.SetLeft(line, d.LineFrom.X);
@@ -1177,7 +1200,129 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ClearDropHint() => _dropLayer.Children.Clear();
+    private void ClearDropHint() { _dropLayer.Children.Clear(); UpdateScopeUi(); }
+
+    // ───────────────────────── 作用域提示（2026-11-23） ─────────────────────────
+
+    private string Scope(List<Block> list) => _ed.ScopeText(list, L.T("scopeRoot"), L.T("scopeElse"));
+
+    /// <summary>落点写成一句话：「程序 › 重复 3 次 · 「点击…」后面」。</summary>
+    private string SlotText(List<Block> list, int index) =>
+        Scope(list) + " · " + (index <= 0 || list.Count == 0 ? L.T("scopeStart") : string.Format(L.T("scopeAfter"), ProgramEditor.Short(BlockText.Summary(list[Math.Min(index, list.Count) - 1], _ed.Program), 18)));
+
+    private void SetScopeBar(string text, bool dragging)
+    {
+        _scopeText.Text = text;
+        _scopeBar.Background = dragging ? Ui.FlowFg : R("Card2");
+        _scopeText.Foreground = dragging ? Brushes.White : R("Text2");
+    }
+
+    /// <summary>选中变了、树重建了：位置条写选中积木在哪个作用域；它所在的容器（和否则行）换成深一点的橙色。</summary>
+    private void UpdateScopeUi()
+    {
+        switch (_selected)
+        {
+            case Block b when _ed.Locate(b) is { } loc:
+                SetScopeBar(L.T("scopeAt") + Scope(loc.List) + " · " + string.Format(L.T("scopeNth"), loc.Index + 1, loc.List.Count), false);
+                break;
+            case ElseMarker em when _ed.Locate(em.Owner) is not null:
+                SetScopeBar(L.T("scopeAt") + Scope(em.Owner.Else), false);
+                break;
+            default:
+                SetScopeBar(L.T("scopeHint"), false);
+                break;
+        }
+        ApplyScopeHighlight();
+        UpdateSticky();
+    }
+
+    private void ApplyScopeHighlight()
+    {
+        (Block Owner, bool IsElse)? scope = _selected switch
+        {
+            Block b when _ed.Locate(b) is { } loc => _ed.OwnerOf(loc.List),
+            ElseMarker em => (em.Owner, true),
+            _ => null
+        };
+        void Walk(ItemCollection items)
+        {
+            foreach (var o in items)
+            {
+                if (o is not TreeViewItem it) continue;
+                if (it.Tag is Block b) it.Background = scope is { } s && ReferenceEquals(s.Owner, b) ? ScopeHi : CategoryBrush(b);
+                else if (it.Tag is ElseMarker em) it.Background = scope is { IsElse: true } s2 && ReferenceEquals(s2.Owner, em.Owner) ? ScopeHi : Ui.FlowFg;
+                Walk(it.Items);
+            }
+        }
+        Walk(_tree.Items);
+    }
+
+    /// <summary>
+    /// 钉顶（像 VS Code 的 sticky scroll）：看树的可见区最上面那一行属于哪些容器，顶块已经滚出去的那些，
+    /// 按层级缩成一行钉在树顶（最多 5 层，再多写「外面还有 n 层」）。点一行就滚回那个容器并选中它。
+    /// </summary>
+    private void UpdateSticky()
+    {
+        _sticky.Children.Clear();
+        if (!AppSettings.Current.StickyScope || _treeSv == null || _treeSv.VerticalOffset < 1 || !_tree.IsLoaded) return;
+        // 可见区最上面那一行 = 按显示顺序第一个「顶块底边在 limit 以下」的积木（不用命中测试：鼠标点不到立柱旁边的空白）。
+        // 算两遍：第二遍把已经钉住的那几行盖住的高度也当成「滚出去了」，盖在下面的那一层也钉上
+        IEnumerable<TreeViewItem> Flat(ItemCollection items)
+        {
+            foreach (var o in items)
+                if (o is TreeViewItem it) { yield return it; foreach (var c in Flat(it.Items)) yield return c; }
+        }
+        double TopOf(TreeViewItem it) => HeaderOf(it) is { } h ? h.TranslatePoint(new Point(0, 0), _tree).Y : double.MaxValue;
+        List<TreeViewItem> ChainAt(double limit)
+        {
+            TreeViewItem? top = null;
+            foreach (var it in Flat(_tree.Items))
+            {
+                if (HeaderOf(it) is not { } h || !h.IsVisible) continue;
+                if (h.TranslatePoint(new Point(0, h.ActualHeight), _tree).Y > limit) { top = it; break; }
+            }
+            var c = new List<TreeViewItem>();
+            if (top == null) return c;
+            for (var it = ItemsControl.ItemsControlFromItemContainer(top) as TreeViewItem; it != null; it = ItemsControl.ItemsControlFromItemContainer(it) as TreeViewItem)
+                c.Insert(0, it);
+            if (top.Tag is IContainerBlock or ElseMarker) c.Add(top);
+            return c.Where(x => TopOf(x) < limit).ToList();
+        }
+        var chain = ChainAt(4);
+        if (chain.Count > 0) chain = ChainAt(4 + Math.Min(chain.Count + 1, 6) * 20);
+        if (chain.Count == 0) return;
+        int skip = Math.Max(0, chain.Count - 5);
+        if (skip > 0) _sticky.Children.Add(StickyRow(null, string.Format(L.T("stickyMore"), skip), 0));
+        for (int i = skip; i < chain.Count; i++)
+        {
+            var c = chain[i];
+            string text = c.Tag switch { Block b => BlockText.Summary(b, _ed.Program), ElseMarker => L.T("elseRow"), _ => "" };
+            _sticky.Children.Add(StickyRow(c, text, Depth(c)));
+        }
+        _sticky.Background = R("CardBg");
+    }
+
+    private static int Depth(TreeViewItem it)
+    {
+        int d = 0;
+        for (var p = ItemsControl.ItemsControlFromItemContainer(it) as TreeViewItem; p != null; p = ItemsControl.ItemsControlFromItemContainer(p) as TreeViewItem)
+            if (p.Tag is not ElseMarker) d++;
+        return it.Tag is ElseMarker ? Math.Max(0, d - 1) : d;
+    }
+
+    private UIElement StickyRow(TreeViewItem? target, string text, int depth)
+    {
+        var tb = new TextBlock { Text = text, Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+        var row = new Border
+        {
+            Child = tb, Background = target?.Background ?? R("Text3"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 2, 10, 2),
+            Margin = new Thickness(16 + depth * 30, 2, 12, 0), HorizontalAlignment = HorizontalAlignment.Left, Cursor = target != null ? Cursors.Hand : null
+        };
+        AutomationProperties.SetAutomationId(tb, "stickyScope");
+        if (target != null)
+            row.MouseLeftButtonUp += (_, _) => { target.IsSelected = true; (HeaderOf(target) ?? target).BringIntoView(); };
+        return row;
+    }
 
     private TreeViewItem? FindItem(Block b)
     {
@@ -1246,6 +1391,7 @@ public sealed partial class MainWindow : Window
     private void ApplySettings()
     {
         ApplyPracticeVisibility();
+        UpdateSticky();
         bool wasDark = Ui.IsDark;
         try { Ui.ApplyTheme(AppSettings.Current.Theme); }
         catch (Exception e) { Log("切换主题失败：" + e); }

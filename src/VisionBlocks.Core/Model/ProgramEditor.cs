@@ -486,6 +486,34 @@ public sealed class ProgramEditor
         return true;
     }
 
+    /// <summary>某个列表所在的作用域（从外到里）：每一层是那块容器，以及是不是它的否则分支。顶层是空的（2026-11-23，位置条用）。</summary>
+    public List<(Block Owner, bool IsElse)> ScopeOf(List<Block> list)
+    {
+        var path = new List<(Block, bool)>();
+        var cur = list;
+        while (OwnerOf(cur) is { } own)
+        {
+            path.Insert(0, own);
+            if (Locate(own.Owner) is not { } l) break;
+            cur = l.List;
+        }
+        return path;
+    }
+
+    /// <summary>作用域写成一句话：「程序 › 重复 3 次 › 如果 … › 否则」。每层的摘要超过 maxLen 个字就截断。</summary>
+    public string ScopeText(List<Block> list, string root = "程序", string elseLabel = "否则", int maxLen = 22)
+    {
+        var parts = new List<string> { root };
+        foreach (var (owner, isElse) in ScopeOf(list))
+        {
+            parts.Add(Short(BlockText.Summary(owner, Program), maxLen));
+            if (isElse) parts.Add(elseLabel);
+        }
+        return string.Join(" › ", parts);
+    }
+
+    public static string Short(string s, int maxLen) => s.Length <= maxLen ? s : s[..(maxLen - 1)] + "…";
+
     /// <summary>一块积木（连同里面的）用到的资源：(种类, 名字)。「当前格」不算。</summary>
     public static HashSet<(string Kind, string Name)> ResourcesUsedBy(Block root)
     {

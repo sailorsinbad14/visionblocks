@@ -27,7 +27,7 @@ This guide has two parts: first **run a sample in five minutes** against the bui
 | ② Capture | **Capture frame**, plus 7 canvas tools: Select, Draw region, Place point, Crop template, Pick color, Try OCR, Draw grid |
 | ③ Resources | Your regions, templates, colors and grids as cards with thumbnails; click one to edit it on the right |
 | Center top | Canvas: the frozen frame. Bottom left shows the mouse position in **base coordinates** (1920 wide, independent of window size and monitor) |
-| ④ Build blocks | Block shelf on the left, the program on the right; title bar buttons: Copy, Paste, Up, Down, Indent, Outdent, Delete. Blocks in the program can be dragged to a new place (a line shows where it will land, a dashed frame shows the Repeat / If it goes into; hold Ctrl when releasing to drop a copy), and the right-click menu has Copy, Cut, Paste, Duplicate, Delete. Up / Down step into and out of Repeat / If blocks, like an IDE's move-statement. Undo / Redo in the top bar cover every change (up to 50 steps) |
+| ④ Build blocks | Block shelf on the left, the program on the right; title bar buttons: Copy, Paste, Up, Down, Indent, Outdent, Delete. Blocks in the program can be dragged to a new place (a line shows where it will land, a dashed frame shows the Repeat / If it goes into; hold Ctrl when releasing to drop a copy), and the right-click menu has Copy, Cut, Paste, Duplicate, Delete. Up / Down step into and out of Repeat / If blocks, like an IDE's move-statement. Undo / Redo in the top bar cover every change (up to 50 steps). The bar above the program shows which scope the selected block is in (“Drop into: …” while dragging), and its Repeat / If turns dark orange; when you scroll down, outer Repeat / If blocks that scrolled out stay pinned at the top, and clicking one jumps back to it |
 | Right top | Properties of the selected block or resource; “Try it” tests a condition on the frozen frame |
 | Right bottom | Activity: hints and run log; “Open results” on its title bar |
 
@@ -191,6 +191,7 @@ Drag also carries the previous block's shortfall to the next one on the same reg
 | Language | 中文 (default) / English, applies right away |
 | Theme | Use system setting (default) / Light / Dark, applies right away |
 | Show practice target | Shows Scene and Launch target in ①; off by default |
+| Pin outer scopes while scrolling | On by default. When the program scrolls down, Repeat / If blocks that scrolled out stay pinned at the top (up to 5 levels). They cover the top few rows; turn it off if that gets in the way |
 | Randomize mouse actions | Off by default; asks before turning on. Clicks land at random spots inside the region with random hold and wait times; optional “Movement path” (curved, fast then slow) and “Overshoot”. **Only for testing whether your own software or game can tell automated input apart.** Each run's random seed is written to the run log (`bot.jsonl`). Movement time is not taken out of a Wait: a Click block first waits 30–120 ms, then moves, then presses, and a Wait block covers only its own span (×0.8–1.2 with “Position and timing” on); each wait's actual length is logged as a `wait` event |
 
 ![Dark theme](images/editor-dark.png)

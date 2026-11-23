@@ -75,6 +75,13 @@ switch ($Step) {
         Click $btn; "插入了 $Arg"
     }
     "treecount" { @(TreeItems $w).Count }
+    "scrolltree" {
+        # 2026-11-23：用 UIA 的滚动模式滚程序树（0–100），看钉顶的外层作用域
+        $tree = $w.FindFirst($TS::Descendants, (Cond $AE::ControlTypeProperty $CT::Tree))
+        $tree.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern).SetScrollPercent(-1, [double]$Arg)
+        "滚到 $Arg%"
+    }
+    "sticky" { ($w.FindAll($TS::Descendants, (Cond $AE::AutomationIdProperty "stickyScope")) | ForEach-Object { $_.Current.Name }) -join " | " }
     "selectblock" {
         $it = TreeItems $w | Where-Object { (TextOf $_) -like $Arg } | Select-Object -Last 1
         if (-not $it) { throw "程序树里没有 $Arg" }

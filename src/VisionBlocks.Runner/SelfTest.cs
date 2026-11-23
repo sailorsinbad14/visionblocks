@@ -170,6 +170,18 @@ internal static class SelfTest
         }
         Check("顶层第一块不能再上移、最后一块不能再下移", !ed.MoveUp(k2) && !ed.MoveDown(c1), Shape(ed.Program));
 
+        // 作用域路径（位置条用）
+        Check("作用域：顶层", ed.ScopeText(ed.Program.Program) == "程序", ed.ScopeText(ed.Program.Program));
+        Check("作用域：如果里面", ed.ScopeText(I.Body) == "程序 › 如果 「区」文字包含「x」", ed.ScopeText(I.Body));
+        Check("作用域：否则分支", ed.ScopeText(I.Else) == "程序 › 如果 「区」文字包含「x」 › 否则", ed.ScopeText(I.Else));
+        var deep = new RepeatBlock { Times = 9 };
+        ed.InsertAt(deep, R.Body, 1);
+        var inner = new IfBlock { Cond = new TextCondition { Region = "区", Contains = "一段很长很长很长很长的文字" } };
+        ed.InsertAt(inner, deep.Body, 0);
+        string dt = ed.ScopeText(inner.Body);
+        Check("作用域：两层嵌套，长摘要截断", dt.StartsWith("程序 › 重复 2 次 › 重复 9 次 › 如果 「区」文字包含「") && dt.EndsWith("…") && ed.ScopeOf(inner.Body).Count == 3, dt);
+        ed.Remove(deep);
+
         // 位置往返
         var path = ed.PathOf(t1)!;
         Check("位置往返", ReferenceEquals(ed.BlockAt(path), t1) && string.Join(".", path) == "2.0.0", string.Join(".", path));

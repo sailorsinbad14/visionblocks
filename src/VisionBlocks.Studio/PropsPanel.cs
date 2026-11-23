@@ -29,6 +29,7 @@ public sealed partial class MainWindow
         _canvas.TestRoi = null;
         _canvas.ScrollPreview = null;
         _canvas.DragPreview = null;
+        UpdateScopeUi();
         switch (_selected)
         {
             case Block b: BlockProps(b); break;

@@ -232,6 +232,15 @@ internal static class Ui
         practice.Unchecked += (_, _) => { s.ShowPracticeTarget = false; AppSettings.Save(); changed(); };
         sp.Children.Add(practice);
 
+        // 钉住外层作用域（2026-11-23）
+        Head("grid", L.T("stickyScope"));
+        sp.Children.Add(Label(L.T("stickyScopeNote"), 12, (Brush)Theme["Text2"]));
+        var sticky = new CheckBox { Content = L.T("stickyScope"), IsChecked = s.StickyScope, Margin = new Thickness(0, 6, 0, 14) };
+        AutomationProperties.SetAutomationId(sticky, "stickyScopeSetting");
+        sticky.Checked += (_, _) => { s.StickyScope = true; AppSettings.Save(); changed(); };
+        sticky.Unchecked += (_, _) => { s.StickyScope = false; AppSettings.Save(); changed(); };
+        sp.Children.Add(sticky);
+
         // 鼠标操作随机化：打开前用和「加入白名单」同样的系统确认框
         Head("select", L.T("humanize"));
         sp.Children.Add(Label(L.T("humanizeNote"), 12, (Brush)Theme["Text2"]));

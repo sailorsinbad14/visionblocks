@@ -22,6 +22,8 @@ internal sealed class AppSettings
     public bool HumanizePath { get; set; } = true;
     /// <summary>轨迹终点前轻微过冲再回正（默认关）。</summary>
     public bool HumanizeOvershoot { get; set; }
+    /// <summary>程序树滚动时把外层作用域钉在顶部（2026-11-23，默认开）。</summary>
+    public bool StickyScope { get; set; } = true;
 
     public static AppSettings Current { get; private set; } = new();
 

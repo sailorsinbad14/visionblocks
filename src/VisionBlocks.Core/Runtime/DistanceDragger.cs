@@ -134,7 +134,9 @@ public sealed class DistanceDragger
                 {
                     if (Math.Abs(progress) < 0.5 && isSingle && Math.Abs(legs[0]) >= MinSingleLeg) { end = true; note = "noMove"; }
                     else if (Math.Abs(progress) < 0.5 && !isSingle) { end = true; note = "noMoveTwoLeg"; }
-                    else if (measuredHere && Math.Sign(progress) == Math.Sign(predicted) && Math.Abs(progress) < 0.5 * Math.Abs(predicted)) { end = true; note = "short"; }
+                    // 「比预期少很多」还要少得够多：门槛、取整有几 px 误差，最后一小笔预计 5 px 只走 2 px 很常见，不算到底（2026-11-23 真靶子）
+                    else if (measuredHere && Math.Sign(progress) == Math.Sign(predicted) && Math.Abs(progress) < 0.5 * Math.Abs(predicted)
+                             && Math.Abs(predicted) - Math.Abs(progress) >= Math.Max(2 * tol, 4)) { end = true; note = "short"; }
                     else if (r.Ok && isSingle)
                     {
                         Learn(legs[0], progress, ref gain, ref thr, ref known, ref firstSingle, ref note);
@@ -148,6 +150,7 @@ public sealed class DistanceDragger
                     }
                 }
                 moved += progress;
+                if (end && Math.Abs(target - moved) <= tol) end = false;   // 已经到了容差里：到没到底都不要紧，算到了
                 prev.Dispose();
                 prev = cur;
                 Log?.Invoke(new

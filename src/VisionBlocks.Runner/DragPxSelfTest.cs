@@ -8,7 +8,8 @@ namespace VisionBlocks.Runner;
 /// <summary>
 /// vbrun selftest-dragpx（2026-11-23）：「拖动」积木不发真输入、不开窗口的自测。
 /// A. 闭环：假列表 + 假时钟，模拟跟手（过门槛后从门槛那一点算起）、过了门槛整段都算、拖滚动条（比例 2）、松手后惯性、到底、画面太平、
-///    很短的距离（先反向再拖回来的两段）、拖到一半暂停、拖到一半用户动了鼠标；都和假列表自己的真实位置对答案。
+///    很短的距离（先反向再拖回来的两段）、拖到一半暂停、拖到一半用户动了鼠标、门槛估差几 px 时最后一小笔少走（不能当成到底）；
+///    都和假列表自己的真实位置对答案。
 /// B. 余差：同一个热区连拖几块，上一块还差的带进下一块，累计不越差越多；到底以后清零。
 /// C. 输入后端：按住拖动在每一种退出路径（正常、被拦、急停、用户动鼠标、暂停、取消、用户按住修饰键）都恰好松开一次左键，而且松开是最后一个事件。
 /// D. 积木：校验、摘要、JSON 往返；滚轮按距离的余差带入。
@@ -47,6 +48,7 @@ public static class DragPxSelfTest
         public long T = 1000;
         public int Strokes;
         public Func<int, int>? CutAfterSteps;              // 第几笔只走到一半就返回（模拟暂停 / 用户动鼠标）
+        public Func<int, double>? Wobble;                  // 第几笔比按门槛和比例算的多走几 px（正 = 内容往上）：真靶子上门槛、取整有几 px 误差
         public SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused;
         private readonly Mat _content;
         private const int H = 870;
@@ -76,6 +78,7 @@ public static class DragPxSelfTest
             }
             // 惯性：松手后顺着最后一段再滑这一笔净位移的 Inertia 倍
             if (Inertia > 0) Offset = Math.Clamp(Offset + Inertia * (Offset - before), 0, MaxOffset);
+            if (dragging && Wobble != null) Offset = Math.Clamp(Offset + Wobble(Strokes), 0, MaxOffset);
             T += 230;
             return SendInputBackend.DragOutcome.Ok;
         }
@@ -92,7 +95,7 @@ public static class DragPxSelfTest
 
     private sealed record Case(string Name, int Goal, double Start = 0, double Threshold = 10, double Ratio = 1, bool Jump = false, double Inertia = 0,
         double MaxOffset = 4000, bool Flat = false, double? WantMoved = null, string WantReason = "done", Func<int, int>? Cut = null,
-        SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused);
+        SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused, Func<int, double>? Wobble = null);
 
     private static void Loop()
     {
@@ -117,10 +120,14 @@ public static class DragPxSelfTest
             new Case("拖到一半暂停，继续后接着拖", 720, Cut: s => s == 2 ? 120 : int.MaxValue),
             new Case("拖到一半用户动了鼠标：停下这一块", 720, Cut: s => s == 2 ? 120 : int.MaxValue, CutOutcome: SendInputBackend.DragOutcome.UserMouse, WantReason: "userMouse"),
             new Case("第一笔被前台守卫拦下", 720, Cut: s => s == 1 ? 0 : int.MaxValue, CutOutcome: SendInputBackend.DragOutcome.Blocked, WantReason: "blocked"),
+            // 真靶子上门槛和取整有几 px 误差（2026-11-23 真靶子 r1 第 5 块）：最后一小笔只走了一部分、甚至没动，不能就当成到底
+            new Case("门槛估差几 px：最后一小笔只走了不到一半，但已在容差里 → 算到了", 100, Wobble: s => s == 2 ? -4 : s == 3 ? -0.5 : 0),
+            new Case("门槛估差几 px：最后一小笔少走几 px、还没到 → 修正门槛接着拖", 100, Wobble: s => s == 2 ? -8 : s == 3 ? -1 : 0),
+            new Case("到底只差几 px：两段的笔一下没动 → 到底", 100, MaxOffset: 94, WantMoved: 94, WantReason: "end"),
         };
         foreach (var c in cases)
         {
-            using var list = new FakeList(c.Flat ? flat : content, c.Start) { Threshold = c.Threshold, Ratio = c.Ratio, Jump = c.Jump, Inertia = c.Inertia, MaxOffset = c.MaxOffset, CutAfterSteps = c.Cut, CutOutcome = c.CutOutcome };
+            using var list = new FakeList(c.Flat ? flat : content, c.Start) { Threshold = c.Threshold, Ratio = c.Ratio, Jump = c.Jump, Inertia = c.Inertia, MaxOffset = c.MaxOffset, CutAfterSteps = c.Cut, CutOutcome = c.CutOutcome, Wobble = c.Wobble };
             var dr = new DistanceDragger();
             var res = dr.RunAsync(c.Goal, 3, 870, list.Io(), CancellationToken.None).GetAwaiter().GetResult();
             double truth = list.Offset - c.Start;

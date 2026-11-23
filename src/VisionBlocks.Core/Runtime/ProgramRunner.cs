@@ -19,6 +19,8 @@ public sealed class RunContext
     public IOverlaySink? Overlay { get; init; }
     /// <summary>热键暂停时返回 true；暂停期间先抬起所有键，再原地等待。</summary>
     public Func<bool>? IsPaused { get; init; }
+    /// <summary>暂停 / 继续的热键文字，显示在遮罩上（2026-11-23 起可以改）。</summary>
+    public string PauseKey { get; init; } = "Ctrl+Alt+F11";
     /// <summary>「记录一行」「截图存图」的输出目录（data.csv 和 images\）。为空时用不了这两块积木。</summary>
     public string? OutputDir { get; init; }
     /// <summary>程序文件路径，写进 manifest.json。</summary>
@@ -98,7 +100,7 @@ public sealed class ProgramRunner : IDisposable
         if (_c.IsPaused == null || !_c.IsPaused()) return;
         _c.Input.ReleaseAll();   // 拖到一半暂停时，输入后端已经先松开了左键，这里再兜一次底
         _c.Log.Write(new { ev = "paused", t = BotLog.Now });
-        Publish("已暂停（Ctrl+Alt+F11 继续）");
+        Publish($"已暂停（{_c.PauseKey} 继续）");
         while (_c.IsPaused()) await Task.Delay(50, ct);
         _c.Log.Write(new { ev = "resumed", t = BotLog.Now });
     }

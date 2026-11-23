@@ -56,6 +56,20 @@ internal static class L
         ["scopeStart"] = ("最前面", "at the start"), ["scopeAfter"] = ("「{0}」后面", "after “{0}”"), ["scopeNth"] = ("第 {0} 块（这一层共 {1} 块）", "block {0} of {1} at this level"),
         ["scopeHint"] = ("选中一块积木，这里显示它在哪个作用域里", "Select a block to see which scope it is in"), ["scopeNoSelf"] = ("不能放进它自己里面", "can't go inside itself"),
         ["stickyMore"] = ("…外面还有 {0} 层", "…{0} more levels outside"),
+        ["shortcuts"] = ("快捷键", "Shortcuts"), ["btnShortcuts"] = ("设置快捷键…", "Shortcuts…"),
+        ["shortcutsNote"] = ("给每个动作配快捷键。编辑动作只在编辑器窗口里生效；光标在输入框里时，复制、粘贴、删除这些键留给输入框。", "Give any action a shortcut. Editing shortcuts work only in the editor window; while you type in a box, Copy, Paste, Delete and the like stay with the box."),
+        ["shortcutsHow"] = ("点一下右边的框，再按新的组合键；「清空」去掉这个快捷键。暂停和急停是运行时的全局热键：必须带 Ctrl 或 Alt，急停不能清空，下次运行生效。", "Click a box, then press the new combination; Clear removes it. Pause and E-stop are global hotkeys while running: they need Ctrl or Alt, E-stop can't be cleared, and changes apply from the next run."),
+        ["scClear"] = ("清空", "Clear"), ["scReset"] = ("全部恢复默认", "Reset all"), ["scNone"] = ("（无）", "(none)"), ["scPalette"] = ("积木架：", "Shelf: "),
+        ["scGroup_file"] = ("文件和编辑", "File and edit"), ["scGroup_run"] = ("运行", "Run"), ["scGroup_capture"] = ("取材", "Capture"),
+        ["scGroup_blocks"] = ("积木", "Blocks"), ["scGroup_palette"] = ("积木架（默认没有快捷键）", "Block shelf (no shortcuts by default)"), ["scGroup_global"] = ("运行中（全局热键）", "While running (global hotkeys)"),
+        ["scConflict"] = ("{0} 已经给了「{1}」。改成给「{2}」吗？「{1}」会变成没有快捷键。", "{0} is already used by “{1}”. Give it to “{2}” instead? “{1}” will have no shortcut."),
+        ["scErr_estopRequired"] = ("急停不能清空", "E-stop can't be cleared"),
+        ["scErr_globalNeedsMod"] = ("暂停和急停必须带 Ctrl 或 Alt：模拟按键也会触发全局热键，不带的话程序按到这个键会把自己停掉", "Pause and E-stop need Ctrl or Alt: simulated keys also trigger global hotkeys, so a plain key could stop the program by itself"),
+        ["scErr_reserved"] = ("这个组合是 Windows 自己用的，换一个", "Windows uses this combination; pick another"),
+        ["scErr_holderIsEStop"] = ("这是急停的键，急停不能空着，换一个", "That's the E-stop key, and E-stop can't be left empty; pick another"),
+        ["scErr_taken"] = ("这个组合被别的程序占着，换一个", "Another program already uses this combination; pick another"),
+        ["scErr_running"] = ("运行中改不了暂停和急停，停下以后再改", "Pause and E-stop can't be changed during a run; stop first"),
+        ["scSaved"] = ("已保存：{0} = {1}", "Saved: {0} = {1}"),
         ["stickyScope"] = ("滚动时钉住外层作用域", "Pin outer scopes while scrolling"),
         ["stickyScopeNote"] = ("程序树往下滚时，把已经滚出去的「重复 / 如果」顶块钉在上面（最多 5 层），点一下就跳回去。默认开。", "When the program tree scrolls, the Repeat / If blocks that scrolled out stay pinned at the top (up to 5 levels); click one to jump back. On by default."),
         ["grpFlow"] = ("流程", "Flow"), ["grpSense"] = ("识别（生成「如果…」）", "Detect (makes an \"If…\")"), ["grpRecord"] = ("读取与记录", "Read & record"), ["grpAct"] = ("动作", "Actions"),
@@ -67,7 +81,7 @@ internal static class L
         ["st_idle"] = ("就绪", "Ready"), ["st_running"] = ("运行中", "Running"), ["st_paused"] = ("已暂停", "Paused"),
         ["st_blocked"] = ("输入被拦截", "Input blocked"), ["st_estop"] = ("已急停", "E-stopped"), ["st_done"] = ("已停止", "Stopped"),
         ["sd_idleBound"] = ("已绑定窗口，随时可以运行", "Window bound, ready to run"), ["sd_idleUnbound"] = ("先启动靶子或绑定窗口", "Launch the target or bind a window first"),
-        ["sd_running"] = ("请不要碰键鼠", "Hands off keyboard and mouse"), ["sd_paused"] = ("按 Ctrl+Alt+F11 继续", "Ctrl+Alt+F11 to resume"),
+        ["sd_running"] = ("请不要碰键鼠", "Hands off keyboard and mouse"), ["sd_paused"] = ("按 {0} 继续", "{0} to resume"),
         ["sd_blocked"] = ("靶子不在前台，点一下靶子窗口", "The target isn't in front. Click the target window"),
         ["sd_estop"] = ("按键已全部抬起", "All keys released"),
         ["language"] = ("界面语言", "Language"),
@@ -112,6 +126,15 @@ internal static class L
         ["重新吸色"] = "Pick again", ["加上这一点"] = "Add this point",
     };
     public static string Z(string zh) => En && Zh2En.TryGetValue(zh, out var en) ? en : zh;
+
+    /// <summary>积木架上每种积木的中文名（和积木架按钮一致；英文由 Z 查表）。</summary>
+    public static string PaletteName(string type) => type switch
+    {
+        "repeatUntil" => "重复直到…", "repeat" => "重复 N 次", "if" => "如果…", "waitUntil" => "等到…", "stop" => "停止",
+        "forEachCell" => "对每一格", "untilNoNewRows" => "重复直到没有新记录", "cond:image" => "看到图像", "cond:color" => "颜色占比", "cond:text" => "文字包含",
+        "readText" => "读文字", "saveImage" => "截图存图", "recordRow" => "记录一行", "click" => "点击", "key" => "按键", "typeText" => "输入文字",
+        "wait" => "等待", "wheel" => "滚轮", "drag" => "拖动", _ => type
+    };
 
     // ───────── 登记表：切换语言时原地换文字 ─────────
     private static readonly List<(WeakReference<DependencyObject> Target, DependencyProperty Prop, Func<string> Text)> Regs = new();

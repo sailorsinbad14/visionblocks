@@ -103,7 +103,7 @@ def main(run: Path) -> int:
         mine = [k for k in target_held if TARGET_TO_BOT.get(k, k) in pressed]
         theirs = [k for k in target_held if k not in mine]
         if theirs:
-            print(f"  {'、'.join(theirs)}：工具没按过，是人按的（比如急停热键 Ctrl+Alt+F12 的修饰键），松手前前台已经换成别的窗口")
+            print(f"  {'、'.join(theirs)}：工具没按过，是人按的（比如急停热键（默认 Ctrl+Alt+F12）的修饰键），松手前前台已经换成别的窗口")
         if mine and left == 0:
             print(f"  {'、'.join(mine)}：工具按过，也发了松开；松开时前台已经不是靶子，消息送到了别的窗口，系统里这个键已经松开")
     print(f"[识别] 名称完全一致 {name_ok}/{len(src)}；库存一致 {stock_ok}/{len(src)}；分类一致 {cat_ok}/{len(src)}；图片文件存在 {imgs_ok}/{len(rows)}")

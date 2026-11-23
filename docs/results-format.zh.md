@@ -103,7 +103,7 @@
 | `done` | 程序正常跑完 | 是 |
 | `stoppedByBlock` | 遇到「停止」积木，正常结束 | 是 |
 | `cancelled` | 用户点了「停止」，或运行时限到了 | 部分 |
-| `emergencyStop` | 用户按了急停 Ctrl+Alt+F12 | 部分 |
+| `emergencyStop` | 用户按了急停热键（默认 Ctrl+Alt+F12） | 部分 |
 | `error` | 运行出错中断 | 部分 |
 
 「部分」表示已经写进表的行都是完整、可用的，只是没有跑完全部流程。编辑器异常退出时 `status` 可能停在 `running`，这种结果请当作不完整处理。

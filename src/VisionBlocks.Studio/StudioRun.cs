@@ -10,7 +10,7 @@ using VisionBlocks.Overlay;
 namespace VisionBlocks.Studio;
 
 /// <summary>
-/// 编辑器里的一次运行：WGC 截图 + 前台守卫 + 输入法守卫 + 遮罩 + 全局热键（Ctrl+Alt+F11 暂停/继续，Ctrl+Alt+F12 急停）。
+/// 编辑器里的一次运行：WGC 截图 + 前台守卫 + 输入法守卫 + 遮罩 + 全局热键（默认 Ctrl+Alt+F11 暂停/继续，Ctrl+Alt+F12 急停，设置里可改）。
 /// 用户在编辑器里点「运行」时编辑器就在前台，所以能把前台交给靶子（由前台进程转交）。
 /// </summary>
 internal sealed class StudioRun
@@ -63,9 +63,10 @@ internal sealed class StudioRun
         }
         EventHandler releaseOnExit = (_, _) => input.Abort("进程退出");
         AppDomain.CurrentDomain.ProcessExit += releaseOnExit;
-        var hotkeys = new HotkeyService();
+        string pauseKey = AppSettings.KeyOf(Keymap.Pause), stopKey = AppSettings.KeyOf(Keymap.EStop);   // 设置里可以改（2026-11-23）
+        var hotkeys = new HotkeyService(pauseKey, stopKey);   // 暂停可以清空（不注册），急停不能
         if (hotkeys.Error != null) { HotkeysFailed = true; onLog("⚠ 热键注册失败：" + hotkeys.Error + "。请用「■ 停止」按钮结束。"); }
-        hotkeys.Toggle += () => { _paused = !_paused; onStatus(_paused ? "已暂停（Ctrl+Alt+F11 继续）" : "运行中"); };
+        hotkeys.Toggle += () => { _paused = !_paused; onStatus(_paused ? $"已暂停（{hotkeys.PauseKey} 继续）" : "运行中"); };
         hotkeys.EmergencyStop += () => { _estopped = true; log.Write(new { ev = "emergencyStop", t = BotLog.Now }); input.Abort("急停热键"); _cts.Cancel(); onLog("■ 急停"); };   // 先置标志再取消：运行结束时编辑器据此显示「已急停」
 
         var overlay = new OverlayWindow(hwnd, ed.Program.Base.W);
@@ -77,7 +78,7 @@ internal sealed class StudioRun
         var runner = new ProgramRunner(new RunContext
         {
             Program = ed.Program, ProgramDir = ed.Dir, Source = source, Input = input, Log = log,
-            TargetHwnd = hwnd, Overlay = overlay, IsPaused = () => _paused,
+            TargetHwnd = hwnd, Overlay = overlay, IsPaused = () => _paused, PauseKey = hotkeys.PauseKey,
             OutputDir = DataDir,   // 每次运行一个结果目录，不覆盖上一次的表
             ProgramPath = ed.ProgramPath
         });

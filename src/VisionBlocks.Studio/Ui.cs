@@ -1,7 +1,10 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
+using VisionBlocks.Core.Input;
+using VisionBlocks.Core.Runtime;
 
 namespace VisionBlocks.Studio;
 
@@ -164,7 +167,7 @@ internal static class Ui
     /// applyLang 返回 false 表示这次不能切（例如运行中），单选框退回原值。其他项改动后立即存盘，再调 changed 让主窗口跟着变。
     /// 语言切换后这个窗口本身不重排（下次打开就是新语言），和以前一样。
     /// </summary>
-    public static void ShowSettings(Window owner, Func<string, bool> applyLang, Action changed)
+    public static void ShowSettings(Window owner, Func<string, bool> applyLang, Action changed, Func<bool>? isRunning = null)
     {
         var w = Dialog(owner, L.T("settings"));
         var s = AppSettings.Current;
@@ -273,12 +276,152 @@ internal static class Ui
         sp.Children.Add(path);
         sp.Children.Add(over);
 
+        // 快捷键（2026-11-23）：单独一个窗口，列表太长放不进设置
+        Head("select", L.T("shortcuts"));
+        sp.Children.Add(Label(L.T("shortcutsNote"), 12, (Brush)Theme["Text2"]));
+        var scBtn = new Button { Content = L.T("btnShortcuts"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 14), Padding = new Thickness(14, 4, 14, 4) };
+        AutomationProperties.SetAutomationId(scBtn, "btnShortcuts");
+        scBtn.Click += (_, _) => ShowShortcuts(w, changed, isRunning ?? (() => false));
+        sp.Children.Add(scBtn);
+
         sp.Children.Add(Label(L.T("dpiNote"), 12, (Brush)Theme["Text3"]));
         var close = new Button { Content = L.T("close"), IsCancel = true, IsDefault = true, Width = 96, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0), Style = (Style)Theme["InkButton"] };
         AutomationProperties.SetAutomationId(close, "settingsClose");
         close.Click += (_, _) => w.Close();
         sp.Children.Add(close);
         w.Content = sp;
+        w.ShowDialog();
+    }
+
+    /// <summary>动作在界面上叫什么（快捷键窗口用，按钮上的名字）。</summary>
+    public static string ActionName(string id) => id switch
+    {
+        "new" => L.T("btnNew"), "open" => L.T("btnOpen"), "save" => L.T("btnSave"), "sample" => L.T("btnSample"),
+        "undo" => L.T("btnUndo"), "redo" => L.T("btnRedo"), "settings" => L.T("settings"),
+        "run" => L.T("btnRun"), "stop" => L.T("btnStop"), "openResults" => L.T("openResults"), "freeze" => L.T("btnFreeze"),
+        "copy" => L.T("btnCopy"), "cut" => L.T("btnCut"), "paste" => L.T("btnPaste"), "duplicate" => L.T("btnDuplicate"), "delete" => L.T("btnDelete"),
+        "moveUp" => L.T("btnUp"), "moveDown" => L.T("btnDown"), "indent" => L.T("btnIndent"), "outdent" => L.T("btnOutdent"),
+        Keymap.Pause => L.T("hkPause"), Keymap.EStop => L.T("hkStop"),
+        _ when id.StartsWith("tool", StringComparison.Ordinal) => L.T(id),
+        _ when id.StartsWith("pal:", StringComparison.Ordinal) => L.T("scPalette") + L.Z(L.PaletteName(id[4..])),
+        _ => id
+    };
+
+    /// <summary>
+    /// 快捷键窗口（2026-11-23）：每个动作一行，右边的框点一下再按组合键就改；也可以直接往框里写「Ctrl+Shift+K」（界面自动化测试用）。
+    /// 撞键时问要不要替换；暂停、急停按 Keymap.Check 的规矩查，再试注册一下看有没有被别的程序占着。改完立即保存。
+    /// </summary>
+    public static void ShowShortcuts(Window owner, Action changed, Func<bool> isRunning)
+    {
+        var w = Dialog(owner, L.T("shortcuts"));
+        var s = AppSettings.Current;
+        var root = new StackPanel { Margin = new Thickness(24, 20, 24, 20), Width = 540 };
+        root.Children.Add(new TextBlock { Text = L.T("shortcuts"), FontSize = 20, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Theme["DisplayFont"], Margin = new Thickness(0, 0, 0, 8) });
+        root.Children.Add(Label(L.T("shortcutsHow"), 12, (Brush)Theme["Text2"]));
+        var err = Label("", 12, Bad);
+        AutomationProperties.SetAutomationId(err, "scError");
+        root.Children.Add(err);
+        var list = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+        root.Children.Add(new ScrollViewer { Content = list, MaxHeight = Math.Max(260, SystemParameters.WorkArea.Height - 300), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        bool quiet = false;
+
+        void Apply(string id, Keymap.Gesture? g)
+        {
+            var map = Keymap.Effective(s.Shortcuts);
+            var def = Keymap.Find(id)!;
+            string want = g?.ToString() ?? "";
+            if (want == map[id]) { err.Text = ""; Rebuild(); return; }
+            if (Keymap.Check(id, g, map) is { } code) { err.Text = L.T("scErr_" + code); Rebuild(); return; }
+            if (def.Global && g is { } gg)
+            {
+                if (isRunning()) { err.Text = L.T("scErr_running"); Rebuild(); return; }
+                if (!HotkeyService.Probe(gg.ToString())) { err.Text = L.T("scErr_taken"); Rebuild(); return; }
+            }
+            if (g is { } x && Keymap.HolderOf(map, x, id) is { } holder)
+            {
+                var ans = MessageBox.Show(w, string.Format(L.T("scConflict"), x, ActionName(holder), ActionName(id)), L.T("shortcuts"), MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+                if (ans != MessageBoxResult.Yes) { Rebuild(); return; }
+                s.Shortcuts[holder] = "";
+            }
+            // 和默认值一样就不存，设置文件里只留改过的
+            string dflt = Keymap.TryParse(def.Default, out var dg) ? dg.ToString() : "";
+            if (want == dflt) s.Shortcuts.Remove(id); else s.Shortcuts[id] = want;
+            AppSettings.Save();
+            err.Text = "";
+            changed();
+            Rebuild();
+        }
+
+        void Rebuild()
+        {
+            quiet = true;
+            list.Children.Clear();
+            var map = Keymap.Effective(s.Shortcuts);
+            string group = "";
+            foreach (var a in Keymap.Actions)
+            {
+                if (a.Group != group)
+                {
+                    group = a.Group;
+                    list.Children.Add(new TextBlock { Text = L.T("scGroup_" + group), FontWeight = FontWeights.SemiBold, FontSize = 13, Margin = new Thickness(0, 10, 0, 4) });
+                }
+                string aid = a.Id.Replace(':', '_');
+                var row = new Grid { Margin = new Thickness(0, 1, 0, 1) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var name = new TextBlock { Text = ActionName(a.Id), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+                var box = new TextBox { Text = map[a.Id], Margin = new Thickness(8, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center };
+                AutomationProperties.SetAutomationId(box, "sc_" + aid);
+                AutomationProperties.SetName(box, ActionName(a.Id));
+                string id = a.Id;
+                // 按下组合键就改；字母、数字不会被打进框里
+                box.PreviewKeyDown += (_, e) =>
+                {
+                    var key = e.Key switch { Key.System => e.SystemKey, Key.ImeProcessed => e.ImeProcessedKey, _ => e.Key };
+                    if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) { e.Handled = true; return; }
+                    if (key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None) return;   // Tab 照常切到下一个框
+                    e.Handled = true;
+                    if (Keymap.NameOfVk(KeyInterop.VirtualKeyFromKey(key)) is not { } kn) return;
+                    var m = Keyboard.Modifiers;
+                    Apply(id, new Keymap.Gesture(m.HasFlag(ModifierKeys.Control), m.HasFlag(ModifierKeys.Alt), m.HasFlag(ModifierKeys.Shift), kn));
+                };
+                box.PreviewTextInput += (_, e) => e.Handled = true;
+                // 直接写进去的文字（界面自动化的 ValuePattern / WM_SETTEXT）：解析得了就照样改
+                // 放到下一轮再处理：撞键时要弹确认框，而且 Apply 会重建列表（把正在触发事件的这个框换掉）
+                box.TextChanged += (_, _) =>
+                {
+                    if (quiet) return;
+                    string t = box.Text;
+                    if (Keymap.TryParse(t, out var g)) w.Dispatcher.BeginInvoke(() => Apply(id, g));
+                    else if (t.Trim().Length == 0) w.Dispatcher.BeginInvoke(() => Apply(id, null));
+                };
+                var clear = new Button { Content = L.T("scClear"), Padding = new Thickness(10, 2, 10, 2) };
+                AutomationProperties.SetAutomationId(clear, "scClear_" + aid);
+                clear.Click += (_, _) => Apply(id, null);
+                Grid.SetColumn(box, 1);
+                Grid.SetColumn(clear, 2);
+                row.Children.Add(name);
+                row.Children.Add(box);
+                row.Children.Add(clear);
+                list.Children.Add(row);
+            }
+            quiet = false;
+        }
+
+        var bottom = new DockPanel { Margin = new Thickness(0, 14, 0, 0), LastChildFill = false };
+        var reset = new Button { Content = L.T("scReset"), Padding = new Thickness(14, 4, 14, 4) };
+        AutomationProperties.SetAutomationId(reset, "scReset");
+        reset.Click += (_, _) => { s.Shortcuts.Clear(); AppSettings.Save(); err.Text = ""; changed(); Rebuild(); };
+        var close = new Button { Content = L.T("close"), IsCancel = true, Width = 96, Style = (Style)Theme["InkButton"] };
+        AutomationProperties.SetAutomationId(close, "scClose");
+        close.Click += (_, _) => w.Close();
+        DockPanel.SetDock(close, Dock.Right);
+        bottom.Children.Add(reset);
+        bottom.Children.Add(close);
+        root.Children.Add(bottom);
+        Rebuild();
+        w.Content = root;
         w.ShowDialog();
     }
 }

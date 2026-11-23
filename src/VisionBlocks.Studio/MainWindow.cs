@@ -11,6 +11,7 @@ using System.Windows.Shell;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using VisionBlocks.Core.Capture;
+using VisionBlocks.Core.Input;
 using VisionBlocks.Core.Model;
 using Condition = VisionBlocks.Core.Model.Condition;
 using VisionBlocks.Core.Runtime;
@@ -113,6 +114,7 @@ public sealed partial class MainWindow : Window
         RefreshWindows();
         ApplyRunUi(RunUi.Idle);
         Closing += OnClosing;
+        PreviewKeyDown += OnShortcutKey;   // 快捷键（2026-11-23）
         SizeChanged += (_, _) => ApplyDensity();
         _poll.Tick += (_, _) => PollRun();
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -243,14 +245,15 @@ public sealed partial class MainWindow : Window
         L.Reg(new TextBlock { FontSize = size, Foreground = R(brush), FontWeight = weight ?? FontWeights.Normal, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center }, TextBlock.TextProperty, key);
 
     /// <summary>带图标的按钮。文字用登记表管理，切语言时原地换；compactHide=true 时紧凑档只留图标（提示里仍有全名）。</summary>
-    private Button IconBtn(string icon, string key, Action onClick, string aid, string? style = null, bool compactHide = false)
+    private Button IconBtn(string icon, string key, Action onClick, string aid, string? style = null, bool compactHide = false, string? action = null)
     {
         var t = Txt(key, 14);
         // 文字跟随按钮前景色：墨黑底按钮（启动靶子、截一帧、运行）上是白字
         t.SetBinding(TextBlock.ForegroundProperty, new System.Windows.Data.Binding("Foreground") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1) });
         var b = new Button { Content = Icons.WithText(icon, t) };
         if (style != null) b.Style = S(style);
-        L.Reg(b, ToolTipProperty, key);
+        if (action != null) L.RegF(b, ToolTipProperty, () => L.T(key) + AppSettings.Suffix(action));   // 提示里带快捷键（2026-11-23）
+        else L.Reg(b, ToolTipProperty, key);
         L.Reg(b, AutomationProperties.NameProperty, key);
         AutomationProperties.SetAutomationId(b, aid);
         b.Click += (_, _) => onClick();
@@ -313,12 +316,12 @@ public sealed partial class MainWindow : Window
         var files = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         foreach (var b in new[]
         {
-            IconBtn("new", "btnNew", NewProgram, "btnNew", compactHide: true),
-            IconBtn("open", "btnOpen", OpenProgram, "btnOpen", compactHide: true),
-            IconBtn("save", "btnSave", () => { _ed.Save(); UpdateTitle(); Log("已保存"); }, "btnSave", compactHide: true),
-            IconBtn("sample", "btnSample", () => LoadProgram(AppPaths.SamplePatrol), "btnSample", compactHide: true),
-            IconBtn("undo", "btnUndo", UndoEdit, "btnUndo", compactHide: true),
-            IconBtn("redo", "btnRedo", RedoEdit, "btnRedo", compactHide: true),
+            IconBtn("new", "btnNew", NewProgram, "btnNew", compactHide: true, action: "new"),
+            IconBtn("open", "btnOpen", OpenProgram, "btnOpen", compactHide: true, action: "open"),
+            IconBtn("save", "btnSave", SaveProgram, "btnSave", compactHide: true, action: "save"),
+            IconBtn("sample", "btnSample", LoadSample, "btnSample", compactHide: true, action: "sample"),
+            IconBtn("undo", "btnUndo", UndoEdit, "btnUndo", compactHide: true, action: "undo"),
+            IconBtn("redo", "btnRedo", RedoEdit, "btnRedo", compactHide: true, action: "redo"),
         })
         { b.Margin = new Thickness(0, 0, 6, 0); files.Children.Add(b); }
         Add(files, 2);
@@ -326,12 +329,12 @@ public sealed partial class MainWindow : Window
         Add(BuildCapsule(), 4);
 
         var hk = new TextBlock { FontSize = 11, Foreground = R("Text3"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 10, 0), LineHeight = 15 };
-        L.RegF(hk, TextBlock.TextProperty, () => $"Ctrl+Alt+F11  {L.T("hkPause")}\nCtrl+Alt+F12  {L.T("hkStop")}");
+        L.RegF(hk, TextBlock.TextProperty, () => $"{AppSettings.KeyOf(Keymap.Pause)}  {L.T("hkPause")}\n{AppSettings.KeyOf(Keymap.EStop)}  {L.T("hkStop")}");
         AutomationProperties.SetAutomationId(hk, "hotkeyHint");
         Add(hk, 6);
 
         var gear = new Button { Content = Icons.Get("gear", 18), Width = 40, Padding = new Thickness(0) };
-        L.Reg(gear, ToolTipProperty, "settings");
+        L.RegF(gear, ToolTipProperty, () => L.T("settings") + AppSettings.Suffix("settings"));
         L.Reg(gear, AutomationProperties.NameProperty, "settings");
         AutomationProperties.SetAutomationId(gear, "btnSettings");
         gear.Click += (_, _) => OpenSettings();
@@ -341,11 +344,11 @@ public sealed partial class MainWindow : Window
 
     private UIElement BuildCapsule()
     {
-        _runBtn = IconBtn("play", "btnRun", Run, "btnRun", "PillButton");
+        _runBtn = IconBtn("play", "btnRun", Run, "btnRun", "PillButton", action: "run");
         _runBtn.Background = R("Ink"); _runBtn.Foreground = R("OnInk");
         _runBtn.Margin = new Thickness(12, 0, 4, 0);
         _runBtn.Height = 34;
-        _stopBtn = IconBtn("stop", "btnStop", () => _run?.Stop(), "btnStop", "PillButton");
+        _stopBtn = IconBtn("stop", "btnStop", () => _run?.Stop(), "btnStop", "PillButton", action: "stop");
         _stopBtn.Height = 34;
         _stopBtn.IsEnabled = false;
         // 运行胶囊旁的「打开结果」：只有图标，有结果时才出现
@@ -417,7 +420,7 @@ public sealed partial class MainWindow : Window
 
         // ② 取材
         var s2 = StepHead("2", "step2");
-        var freeze = IconBtn("camera", "btnFreeze", Freeze, "btnFreeze", "InkButton");
+        var freeze = IconBtn("camera", "btnFreeze", Freeze, "btnFreeze", "InkButton", action: "freeze");
         Tight(freeze, new Thickness(0, 0, 0, 10), new Thickness(0, 0, 0, 6));
         s2.Children.Add(freeze);
         var tiles = _tiles;
@@ -436,7 +439,7 @@ public sealed partial class MainWindow : Window
             content.Children.Add(label);
             var tb = new ToggleButton { Style = S("ToolTile"), Content = content, IsChecked = t == Tool.Select };
             L.Reg(tb, AutomationProperties.NameProperty, key);
-            L.Reg(tb, ToolTipProperty, "hint_" + key);
+            L.RegF(tb, ToolTipProperty, () => L.T("hint_" + key) + AppSettings.Suffix("tool" + t));
             AutomationProperties.SetAutomationId(tb, key);
             tb.Click += (_, _) => SetTool(t);
             _toolButtons[t] = tb;
@@ -561,13 +564,13 @@ public sealed partial class MainWindow : Window
         var moves = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         foreach (var b in new[]
         {
-            IconBtn("copy", "btnCopy", CopySelected, "btnCopy", compactHide: true),
-            IconBtn("paste", "btnPaste", PasteAtSelection, "btnPaste", compactHide: true),
-            IconBtn("up", "btnUp", () => WithSelectedBlock(b => { if (!_ed.MoveUp(b)) Log("已经在最上面了"); }), "btnUp", compactHide: true),
-            IconBtn("down", "btnDown", () => WithSelectedBlock(b => { if (!_ed.MoveDown(b)) Log("已经在最下面了"); }), "btnDown", compactHide: true),
-            IconBtn("indent", "btnIndent", () => WithSelectedBlock(b => { if (!_ed.Indent(b)) Log("上面一块不是「重复/如果」，没法缩进进去"); }), "btnIndent", compactHide: true),
-            IconBtn("outdent", "btnOutdent", () => WithSelectedBlock(b => _ed.Outdent(b)), "btnOutdent", compactHide: true),
-            IconBtn("trash", "btnDelete", () => WithSelectedBlock(b => { _ed.Remove(b); _selected = null; }), "btnDelete", compactHide: true),
+            IconBtn("copy", "btnCopy", CopySelected, "btnCopy", compactHide: true, action: "copy"),
+            IconBtn("paste", "btnPaste", PasteAtSelection, "btnPaste", compactHide: true, action: "paste"),
+            IconBtn("up", "btnUp", MoveSelectedUp, "btnUp", compactHide: true, action: "moveUp"),
+            IconBtn("down", "btnDown", MoveSelectedDown, "btnDown", compactHide: true, action: "moveDown"),
+            IconBtn("indent", "btnIndent", IndentSelected, "btnIndent", compactHide: true, action: "indent"),
+            IconBtn("outdent", "btnOutdent", OutdentSelected, "btnOutdent", compactHide: true, action: "outdent"),
+            IconBtn("trash", "btnDelete", DeleteSelected, "btnDelete", compactHide: true, action: "delete"),
         })
         { b.Margin = new Thickness(4, 0, 0, 0); b.MinHeight = 32; moves.Children.Add(b); }
         ((Button)moves.Children[^1]).Foreground = Ui.Bad;
@@ -660,7 +663,7 @@ public sealed partial class MainWindow : Window
         var lh = Txt("activity", 15, "Ink", FontWeights.SemiBold);
         lh.FontFamily = (FontFamily)_theme["DisplayFont"];
         // 运行结束后打开这次的结果文件夹
-        _openResultsBtn = IconBtn("open", "openResults", OpenResults, "btnOpenResults");
+        _openResultsBtn = IconBtn("open", "openResults", OpenResults, "btnOpenResults", action: "openResults");
         L.Reg(_openResultsBtn, ToolTipProperty, "openResultsTip");
         _openResultsBtn.Height = 30;
         _openResultsBtn.FontSize = 12;
@@ -700,7 +703,7 @@ public sealed partial class MainWindow : Window
         sub ??= s switch
         {
             RunUi.Running => L.T("sd_running") + (blocked > 0 ? $" · {(L.En ? "blocked" : "拦截")} {blocked}" : ""),
-            RunUi.Paused => L.T("sd_paused"), RunUi.Blocked => L.T("sd_blocked"), RunUi.EStop => L.T("sd_estop"),
+            RunUi.Paused => string.Format(L.T("sd_paused"), AppSettings.KeyOf(Keymap.Pause)), RunUi.Blocked => L.T("sd_blocked"), RunUi.EStop => L.T("sd_estop"),
             _ => _bound != IntPtr.Zero && WindowInfo.IsAlive(_bound) ? L.T("sd_idleBound") : L.T("sd_idleUnbound")
         };
         _status.Text = title;
@@ -961,6 +964,64 @@ public sealed partial class MainWindow : Window
         WarnCurrentCell();
     }
 
+    // ───────────────────────── 快捷键（2026-11-23） ─────────────────────────
+
+    private Dictionary<string, Action>? _commands;
+
+    /// <summary>每个动作做什么：和按钮、右键菜单调同一个方法。暂停、急停是运行时的全局热键，不在这里。</summary>
+    private Dictionary<string, Action> Commands => _commands ??= BuildCommands();
+
+    private Dictionary<string, Action> BuildCommands()
+    {
+        var c = new Dictionary<string, Action>
+        {
+            ["new"] = NewProgram, ["open"] = OpenProgram, ["save"] = SaveProgram, ["sample"] = LoadSample,
+            ["undo"] = UndoEdit, ["redo"] = RedoEdit, ["settings"] = OpenSettings,
+            ["run"] = Run, ["stop"] = () => _run?.Stop(), ["openResults"] = OpenResults, ["freeze"] = Freeze,
+            ["copy"] = CopySelected, ["cut"] = CutSelected, ["paste"] = PasteAtSelection, ["duplicate"] = DuplicateSelected,
+            ["delete"] = DeleteSelected, ["moveUp"] = MoveSelectedUp, ["moveDown"] = MoveSelectedDown, ["indent"] = IndentSelected, ["outdent"] = OutdentSelected,
+        };
+        foreach (Tool t in Enum.GetValues<Tool>()) { var tt = t; c["tool" + t] = () => SetTool(tt); }
+        foreach (var type in Keymap.PaletteTypes) { var ty = type; c["pal:" + type] = () => InsertFromPalette(ty); }
+        return c;
+    }
+
+    /// <summary>
+    /// 编辑器窗口里的按键 → 动作。光标在输入框里时，打字、复制粘贴、删字这些键留给输入框（Keymap.IsTextEditing）；
+    /// 中文输入法开着时按键先到输入法，WPF 给的是 ImeProcessed，要取 ImeProcessedKey 才是真正按的键。
+    /// </summary>
+    private void OnShortcutKey(object sender, KeyEventArgs e)
+    {
+        var key = e.Key switch { Key.System => e.SystemKey, Key.ImeProcessed => e.ImeProcessedKey, _ => e.Key };
+        if (key is Key.None or Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
+        if (Keymap.NameOfVk(KeyInterop.VirtualKeyFromKey(key)) is not { } name) return;
+        var m = Keyboard.Modifiers;
+        var g = new Keymap.Gesture(m.HasFlag(ModifierKeys.Control), m.HasFlag(ModifierKeys.Alt), m.HasFlag(ModifierKeys.Shift), name);
+        var focus = Keyboard.FocusedElement as DependencyObject;
+        bool inText = focus is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox || (focus != null && FindAncestor<ComboBox>(focus) is { IsEditable: true });
+        if (inText && Keymap.IsTextEditing(g)) return;
+        var map = Keymap.Effective(AppSettings.Current.Shortcuts);
+        if (Keymap.HolderOf(map, g, "") is not { } id || Keymap.Find(id) is { Global: true }) return;
+        if (!Commands.TryGetValue(id, out var act)) return;
+        e.Handled = true;
+        act();
+    }
+
+    private static T? FindAncestor<T>(DependencyObject d) where T : DependencyObject
+    {
+        for (var x = d; x != null; x = x is Visual ? VisualTreeHelper.GetParent(x) : LogicalTreeHelper.GetParent(x))
+            if (x is T t) return t;
+        return null;
+    }
+
+    private void SaveProgram() { _ed.Save(); UpdateTitle(); Log("已保存"); }
+    private void LoadSample() => LoadProgram(AppPaths.SamplePatrol);
+    private void DeleteSelected() => WithSelectedBlock(b => { _ed.Remove(b); _selected = null; });
+    private void MoveSelectedUp() => WithSelectedBlock(b => { if (!_ed.MoveUp(b)) Log("已经在最上面了"); });
+    private void MoveSelectedDown() => WithSelectedBlock(b => { if (!_ed.MoveDown(b)) Log("已经在最下面了"); });
+    private void IndentSelected() => WithSelectedBlock(b => { if (!_ed.Indent(b)) Log("上面一块不是「重复/如果」，没法缩进进去"); });
+    private void OutdentSelected() => WithSelectedBlock(b => _ed.Outdent(b));
+
     // ───────────────────────── 复制、粘贴、撤销（2026-11-23） ─────────────────────────
 
     private void CopySelected() => WithSelectedBlock(b =>
@@ -1033,6 +1094,8 @@ public sealed partial class MainWindow : Window
         {
             var mi = new MenuItem();
             L.Reg(mi, HeaderedItemsControl.HeaderProperty, key);
+            string action = aid[3..].ToLowerInvariant();
+            L.RegF(mi, MenuItem.InputGestureTextProperty, () => AppSettings.KeyOf(action));
             AutomationProperties.SetAutomationId(mi, aid);
             if (fg != null) mi.Foreground = fg;
             mi.Click += (_, _) => act();
@@ -1043,7 +1106,7 @@ public sealed partial class MainWindow : Window
         Item("btnPaste", PasteAtSelection, "ctxPaste");
         Item("btnDuplicate", DuplicateSelected, "ctxDuplicate");
         m.Items.Add(new Separator());
-        Item("btnDelete", () => WithSelectedBlock(b => { _ed.Remove(b); _selected = null; }), "ctxDelete", Ui.Bad);
+        Item("btnDelete", DeleteSelected, "ctxDelete", Ui.Bad);
         return m;
     }
 
@@ -1384,7 +1447,7 @@ public sealed partial class MainWindow : Window
             L.Set(lang);
             ApplyLanguage();
             return true;
-        }, ApplySettings);
+        }, ApplySettings, () => _run != null);
     }
 
     /// <summary>设置里除语言以外的项改了：练习靶子面板显示与否、主题。鼠标随机化在下次运行开始时读。</summary>
@@ -1392,6 +1455,7 @@ public sealed partial class MainWindow : Window
     {
         ApplyPracticeVisibility();
         UpdateSticky();
+        L.Relabel();   // 快捷键改了：按钮提示、顶栏热键提示跟着变
         bool wasDark = Ui.IsDark;
         try { Ui.ApplyTheme(AppSettings.Current.Theme); }
         catch (Exception e) { Log("切换主题失败：" + e); }
@@ -1730,7 +1794,7 @@ public sealed partial class MainWindow : Window
         try { _pill?.Close(); _pill = new StatusPill(_bound, Ui.IsDark); _pill.Show(); } catch (Exception e) { _pill = null; Log("⚠ 置顶状态胶囊没能显示：" + e.Message); }
         ApplyRunUi(RunUi.Running);
         _poll.Start();
-        Log("▶ 开始运行。接下来请不要碰键鼠；随时可按 Ctrl+Alt+F12 急停。");
+        Log($"▶ 开始运行。接下来请不要碰键鼠；随时可按 {AppSettings.KeyOf(Keymap.EStop)} 急停。");
         var run = _run;
         string result = await run.RunAsync(_ed, _bound, s => Dispatcher.BeginInvoke(() => Log(s)), _ => { });
         _poll.Stop();

@@ -22,7 +22,7 @@ This guide has two parts: first **run a sample in five minutes** against the bui
 |---|---|
 | Top left | App icon, current program name and path; New, Open…, Save, Load sample |
 | Top center | **Run capsule**: status + ▶ Run + ■ Stop; after a run, a small button opens the results |
-| Top right | Hotkeys (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> pause / resume, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> emergency stop), ⚙ Settings |
+| Top right | Hotkeys (by default <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> pause / resume, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> emergency stop; follows Settings if you change them), ⚙ Settings |
 | ① Target & window | Monitor, practice target (shown when enabled in Settings), **Bound window**, Refresh |
 | ② Capture | **Capture frame**, plus 7 canvas tools: Select, Draw region, Place point, Crop template, Pick color, Try OCR, Draw grid |
 | ③ Resources | Your regions, templates, colors and grids as cards with thumbnails; click one to edit it on the right |
@@ -40,7 +40,7 @@ In a small window the editor switches to a compact layout where some buttons sho
 3. In ① set Scene to **Patrol game**, click **Launch target**. The target window opens and is bound automatically; it counts down “准备中 15…”.
 4. Within 15 seconds click **▶ Run**, then keep your hands off the keyboard and mouse.
 5. Watch: when an F keycap pops up the program presses F (E, R and the faded F are decoys), and when the health bar turns red it clicks “喝药” (drink potion). The run capsule and a small pill at the top of the screen are green, “Running”.
-6. Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> at any time to stop: the capsule shows “E-stopped” and all keys are released at once.
+6. Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> (the default e-stop) at any time to stop: the capsule shows “E-stopped” and all keys are released at once.
 
 **Status colors**: green = running; amber = paused; red = input blocked (you clicked another window, so keys and clicks meant for the target were held back; click the target window to resume); after an emergency stop it is light red “E-stopped”, and the taskbar stays red until the next run.
 
@@ -192,6 +192,7 @@ Drag also carries the previous block's shortfall to the next one on the same reg
 | Theme | Use system setting (default) / Light / Dark, applies right away |
 | Show practice target | Shows Scene and Launch target in ①; off by default |
 | Pin outer scopes while scrolling | On by default. When the program scrolls down, Repeat / If blocks that scrolled out stay pinned at the top (up to 5 levels). They cover the top few rows; turn it off if that gets in the way |
+| Shortcuts | ⚙ Settings → Shortcuts…: one row per action; click a box and press the new combination, conflicts ask before replacing, Reset all restores the defaults. Common defaults: <kbd>Ctrl</kbd>+<kbd>S</kbd> save, <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Y</kbd> undo / redo, <kbd>F5</kbd> run, <kbd>F6</kbd> capture frame, <kbd>1</kbd>–<kbd>7</kbd> canvas tools, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> / <kbd>D</kbd> copy / cut / paste / duplicate, <kbd>Delete</kbd> delete, <kbd>Alt</kbd>+arrows up / down / indent / outdent; each shelf block has no key by default but can get one. Editing shortcuts work only in the editor window, and while you type in a box, Copy, Paste, Delete and the like stay with the box. Pause and e-stop are global hotkeys while running: they need <kbd>Ctrl</kbd> or <kbd>Alt</kbd> (simulated keys also trigger global hotkeys), e-stop can't be cleared, and changes apply from the next run |
 | Randomize mouse actions | Off by default; asks before turning on. Clicks land at random spots inside the region with random hold and wait times; optional “Movement path” (curved, fast then slow) and “Overshoot”. **Only for testing whether your own software or game can tell automated input apart.** Each run's random seed is written to the run log (`bot.jsonl`). Movement time is not taken out of a Wait: a Click block first waits 30–120 ms, then moves, then presses, and a Wait block covers only its own span (×0.8–1.2 with “Position and timing” on); each wait's actual length is logged as a `wait` event |
 
 ![Dark theme](images/editor-dark.png)
@@ -205,6 +206,6 @@ Each run's results folder holds `data.csv`, `images\` and `manifest.json`, and `
 - **“Read text” is always empty**: make sure Chinese (Simplified) is installed, widen the text region with blank space around it, and test with “Try OCR” in ② or “Try reading” in Properties.
 - **The pill stays red, “Input blocked”**: the target window is not in front. Don't touch the keyboard and mouse while running; pop-ups and notifications that take focus cause it too.
 - **Cells are cut off after scrolling, rows don't line up**: one notch in this software is not a whole row. Switch the Wheel block to scroll by distance, see [5.1](#51-rows-dont-line-up-after-scrolling-scroll-by-distance).
-- **Hotkeys don't respond**: another program holds <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> / <kbd>F12</kbd>; Activity says so. Use ■ Stop in the run capsule instead.
+- **Hotkeys don't respond**: another program holds the pause or e-stop combination (by default <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> / <kbd>F12</kbd>); Activity says so. Use ■ Stop in the run capsule, or pick another combination under ⚙ Settings → Shortcuts….
 - **Portable build says the folder is not writable and data moved to Documents**: move the whole folder somewhere writable, such as the Desktop or drive D.
 - **The taskbar still shows an old icon**: Windows' icon cache; unpin and pin again.

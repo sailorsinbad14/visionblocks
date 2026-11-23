@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VisionBlocks.Core.Input;
 
 namespace VisionBlocks.Studio;
 
@@ -24,6 +25,14 @@ internal sealed class AppSettings
     public bool HumanizeOvershoot { get; set; }
     /// <summary>程序树滚动时把外层作用域钉在顶部（2026-11-23，默认开）。</summary>
     public bool StickyScope { get; set; } = true;
+    /// <summary>用户改过的快捷键：动作 → 组合键文字（"" = 清空）。没改的用 Keymap 里的默认值（2026-11-23）。</summary>
+    public Dictionary<string, string> Shortcuts { get; set; } = new();
+
+    /// <summary>某个动作现在的快捷键（"" = 没有）。</summary>
+    public static string KeyOf(string actionId) => Keymap.Effective(Current.Shortcuts).TryGetValue(actionId, out var k) ? k : "";
+
+    /// <summary>按钮提示后面跟的「（Ctrl+S）」。</summary>
+    public static string Suffix(string actionId) => KeyOf(actionId) is { Length: > 0 } k ? (L.En ? $" ({k})" : $"（{k}）") : "";
 
     public static AppSettings Current { get; private set; } = new();
 
@@ -35,6 +44,7 @@ internal sealed class AppSettings
                 Current = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(AppPaths.SettingsFile)) ?? new();
         }
         catch { Current = new(); }   // 设置文件坏了就全用默认值
+        Current.Shortcuts ??= new();
         if (Current.Lang is not ("zh" or "en")) Current.Lang = "zh";
         if (Current.Theme is not ("system" or "light" or "dark")) Current.Theme = "system";
     }

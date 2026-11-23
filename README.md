@@ -18,7 +18,7 @@ Build “look at the screen → recognize → click or press → record” autom
 - **拼积木写流程**：「对每一格」「重复直到没有新记录」「如果看到图像」「等到」「点击」「按键」「滚轮」「读文字」「截图存图」「记录一行」……橙色是流程，青色是识别和读取，蓝色是动作。
 - **在截图上「试一下」**：每个条件、每次读字都能先在冻结帧上试，不用真跑。
 - **结果是一张表 + 图片**：跑完得到 `data.csv`、`images\` 和一份 `manifest.json`，其他程序照着[结果格式说明](docs/results-format.zh.md)就能读。
-- **安全**：只给你绑定的那一个窗口发键鼠，每次发之前检查它在前台；<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> 随时急停，<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> 暂停；屏幕顶上的状态胶囊和任务栏颜色一眼看出在跑、暂停还是被拦。
+- **安全**：只给你绑定的那一个窗口发键鼠，每次发之前检查它在前台；<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> 随时急停，<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> 暂停（默认的组合，设置里可以改）；屏幕顶上的状态胶囊和任务栏颜色一眼看出在跑、暂停还是被拦。
 - **自带练习靶子**：巡逻小游戏和背包两个场景，配两个示例程序，在不碰任何真软件的情况下把整套流程跑一遍。
 - 中文 / English 界面，浅色 / 深色主题，跟着每块屏幕的分辨率和缩放自适应。
 
@@ -88,7 +88,7 @@ start-editor.cmd
 
 VisionBlocks (Chinese name 视搭) is a no-code automation editor for Windows desktop apps. You capture a frame, mark regions, templates, colors and grids on it, snap blocks into a program (“for each cell”, “if image is seen”, “click”, “press key”, “read text”, “record row”…), try each condition on the frozen frame, then run it. Results come out as `data.csv` plus images and a `manifest.json` that other programs can read ([results format](docs/results-format.en.md)).
 
-- **Safe by design**: input goes only to the one window you bound, checked to be in front before every key or click. <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> is an emergency stop, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> pauses. A status pill at the top of the screen and the taskbar color show running / paused / blocked at a glance.
+- **Safe by design**: input goes only to the one window you bound, checked to be in front before every key or click. <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> is an emergency stop, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> pauses (defaults; you can change them in Settings). A status pill at the top of the screen and the taskbar color show running / paused / blocked at a glance.
 - **Built-in practice target** with two scenes and two sample programs, so you can try everything without touching real software.
 - Chinese or English UI, light or dark theme, adapts to each monitor's resolution and scaling.
 

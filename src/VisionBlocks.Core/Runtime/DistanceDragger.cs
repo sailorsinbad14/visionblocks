@@ -140,8 +140,9 @@ public sealed class DistanceDragger
                 string note = "";
                 bool isSingle = legs.Length == 1;
                 int holdUsed = hold;
-                // 松手后还在滑：这一笔走了多少照算，但不拿来判断到底、也不学比例和门槛；这个热区以后松手前停久一点
-                if (outcome == SendInputBackend.DragOutcome.Ok && r.Ok && Math.Abs(slide) > Math.Max(1, tol / 2))
+                // 松手后还在往前滑：这一笔走了多少照算，但不拿来判断到底、也不学比例和门槛；这个热区以后松手前停久一点。
+                // 往回动的（到头回弹、往回吸附）和按住多久无关，不算
+                if (outcome == SendInputBackend.DragOutcome.Ok && r.Ok && Math.Sign(slide) == -Math.Sign(legs[^1]) && Math.Abs(slide) > Math.Max(1, tol / 2))
                 {
                     note = "slide";
                     hold = Math.Min(MaxHoldMs, Math.Max(2 * hold, 300));
@@ -234,27 +235,37 @@ public sealed class DistanceDragger
 
     /// <summary>
     /// 松开以后等画面停稳再量；按预计的方向找，找不到再按反方向找一次（两段的笔、或者门槛估错时，可能往反方向动了）。
-    /// slideDir 不为 0 时先拿松手后的第一帧，和停稳的那一帧比，返回松手后又滑了多少（基准像素）。
+    /// slideDir 不为 0 时先拿松手后的第一帧，返回停稳的那一帧比它又走了多少（基准像素，带方向，正 = 内容往上）。
     /// </summary>
     private static async Task<(Mat Cur, double Progress, ScrollMeter.Result R, double Slide)> Measure(Io io, Mat prev, double? predicted, double k, int slideDir, CancellationToken ct)
     {
         Mat? first = slideDir != 0 ? (await io.Grab(ct)).Gray : null;
         var (cur, _) = await DistanceScroller.Settle(io.Grab, io.Delay, io.NowMs, io.NowMs(), ct);
-        double slide = 0;
+        int dir = predicted is double p && Math.Abs(p) > 0.5 ? Math.Sign(p) : 1;
+        ScrollMeter.Result Shift(Mat to)
+        {
+            var r = ScrollMeter.Measure(prev, to, dir, predicted is double e ? Math.Abs(e) * k : null);
+            if (!r.Ok || Math.Abs(r.ShiftPx) < 0.5)
+            {
+                var r2 = ScrollMeter.Measure(prev, to, -dir, null);
+                if (r2.Ok && Math.Abs(r2.ShiftPx) >= 0.5) r = r2;
+            }
+            return r;
+        }
+        var r = Shift(cur);
+        double progress = r.Ok ? r.ShiftPx / k : 0, slide = 0;
         if (first != null)
         {
-            var rs = ScrollMeter.Measure(first, cur, slideDir, null);
-            if (rs.Ok) slide = rs.ShiftPx / k;
+            // 第一帧和停稳的那一帧都从这一笔之前那一帧量（带预计值），两个差就是松手后又走了多少。
+            // 不直接拿第一帧和停稳的比：到头回弹、往回吸附时，格子长得一样的列表会错配到隔一两行的地方，看着像往前滑了好几百（2026-11-24 自测）
+            if (r.Ok)
+            {
+                var r1 = Shift(first);
+                if (r1.Ok) slide = progress - r1.ShiftPx / k;
+            }
             first.Dispose();
         }
-        int dir = predicted is double p && Math.Abs(p) > 0.5 ? Math.Sign(p) : 1;
-        var r = ScrollMeter.Measure(prev, cur, dir, predicted is double e ? Math.Abs(e) * k : null);
-        if (!r.Ok || Math.Abs(r.ShiftPx) < 0.5)
-        {
-            var r2 = ScrollMeter.Measure(prev, cur, -dir, null);
-            if (r2.Ok && Math.Abs(r2.ShiftPx) >= 0.5) r = r2;
-        }
-        return (cur, r.Ok ? r.ShiftPx / k : 0, r, slide);
+        return (cur, progress, r, slide);
     }
 
     /// <summary>

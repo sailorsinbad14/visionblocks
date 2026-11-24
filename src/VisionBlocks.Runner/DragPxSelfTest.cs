@@ -8,7 +8,8 @@ namespace VisionBlocks.Runner;
 /// <summary>
 /// vbrun selftest-dragpx（2026-11-23）：「拖动」积木不发真输入、不开窗口的自测。
 /// A. 闭环：假列表 + 假时钟，模拟跟手（过门槛后从门槛那一点算起）、过了门槛整段都算、拖滚动条（比例 2）、松手后惯性、到底、画面太平、
-///    很短的距离（先反向再拖回来的两段）、拖到一半暂停、拖到一半用户动了鼠标、门槛估差几 px 时最后一小笔少走（不能当成到底）；
+///    很短的距离（先反向再拖回来的两段）、拖到一半暂停、拖到一半用户动了鼠标、门槛估差几 px 时最后一小笔少走（不能当成到底）、
+///    到头回弹（不能把弹回来当成往前滑）、吸附到整行；
 ///    都和假列表自己的真实位置对答案。
 /// B. 余差：同一个热区连拖几块，上一块还差的带进下一块，累计不越差越多；到底以后清零。
 /// C. 输入后端：按住拖动在每一种退出路径（正常、被拦、急停、用户动鼠标、暂停、取消、用户按住修饰键）都恰好松开一次左键，而且松开是最后一个事件。
@@ -54,6 +55,13 @@ public static class DragPxSelfTest
         public bool Fling;
         private double _flingV, _flingOff0;
         private long _flingT0;
+        // 松手后自己挪到一个位置（2026-11-24，followups X16）：Elastic = 到头回弹（同 Unity 滚动列表的默认：拖过头的那段按橡皮筋算，越拉越拉不动，
+        // 松手后弹回到头）；SnapPitch > 0 = 吸附到整行（SnapForward 往这一笔走的方向对齐，否则就近）。挪动按 SmoothDamp 先快后慢，约 0.1 秒；按下就停住
+        public bool Elastic, SnapForward;
+        public double SnapPitch;
+        private double _settleFrom, _settleTo;
+        private long _settleT0;
+        private bool _settling;
         public SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused;
         private readonly Mat _content;
         private const int H = 870;
@@ -71,6 +79,12 @@ public static class DragPxSelfTest
         /// <summary>惯性滑到现在（假时钟 T）的位置；滑停了就清掉速度。</summary>
         private void Advance()
         {
+            if (_settling)
+            {
+                double ts = (T - _settleT0) / 1000.0, w = 2 / 0.1;
+                Offset = _settleTo + (_settleFrom - _settleTo) * (1 + w * ts) * Math.Exp(-w * ts);
+                if (Math.Abs(Offset - _settleTo) < 0.2) { Offset = _settleTo; _settling = false; }
+            }
             if (_flingV == 0) return;
             double tau = (T - _flingT0) / 1000.0, stop = Math.Abs(_flingV) > 1 ? Math.Log(Math.Abs(_flingV)) / FlingK : 0;
             double off = _flingOff0 + _flingV * (1 - Math.Exp(-FlingK * Math.Min(tau, stop))) / FlingK;
@@ -78,11 +92,16 @@ public static class DragPxSelfTest
             if (tau >= stop || off != Offset) _flingV = 0;
         }
 
+        /// <summary>拖动时内容的位置：到头回弹的列表拖过头的那段按 Unity 的橡皮筋算，其余到头就卡住。</summary>
+        private double Place(double raw) =>
+            Elastic && raw > MaxOffset ? MaxOffset + (1 - 1 / ((raw - MaxOffset) * 0.55 / H + 1)) * H : Math.Clamp(raw, 0, MaxOffset);
+
         /// <summary>列表最后停在哪（还在滑的话按滑停的位置）。</summary>
         public double Final
         {
             get
             {
+                if (_settling) return _settleTo;
                 if (_flingV == 0) return Offset;
                 double stop = Math.Abs(_flingV) > 1 ? Math.Log(Math.Abs(_flingV)) / FlingK : 0;
                 return Math.Clamp(_flingOff0 + _flingV * (1 - Math.Exp(-FlingK * stop)) / FlingK, 0, MaxOffset);
@@ -94,6 +113,7 @@ public static class DragPxSelfTest
             Strokes++;
             Advance();
             _flingV = 0;   // 按下就停住
+            _settling = false;
             double v = 0;
             double pos = 0, anchor = 0, start = Offset;
             bool dragging = false;
@@ -108,7 +128,7 @@ public static class DragPxSelfTest
                     pos += leg / n;
                     double prevOff = Offset, dt = Math.Abs(leg / n) / 800;
                     if (!dragging && Math.Abs(pos) >= Threshold) { dragging = true; anchor = Jump ? 0 : pos; }
-                    if (dragging) Offset = Math.Clamp(start + Ratio * (anchor - pos), 0, MaxOffset);   // 内容跟着光标：光标往上（负）内容往上（正）
+                    if (dragging) Offset = Place(start + Ratio * (anchor - pos));   // 内容跟着光标：光标往上（负）内容往上（正）
                     v += ((Offset - prevOff) / dt - v) * Math.Min(1, dt * 10);
                 }
                 T += (long)(Math.Abs(leg) / 0.8);   // 800 px/秒
@@ -118,6 +138,14 @@ public static class DragPxSelfTest
             if (dragging && Wobble != null) Offset = Math.Clamp(Offset + Wobble(Strokes), 0, MaxOffset);
             T += holdMs;   // 松手前按住不动：速度按 τ = 0.1 秒降下来
             if (Fling && dragging) { _flingV = v * Math.Exp(-10 * holdMs / 1000.0); _flingT0 = T; _flingOff0 = Offset; }
+            double to = Offset;
+            if (Elastic && Offset > MaxOffset) to = MaxOffset;
+            else if (SnapPitch > 0)
+            {
+                double q = Offset / SnapPitch;
+                to = Math.Clamp((SnapForward ? (Offset >= before ? Math.Ceiling(q - 1e-9) : Math.Floor(q + 1e-9)) : Math.Round(q)) * SnapPitch, 0, MaxOffset);
+            }
+            if (dragging && Math.Abs(to - Offset) > 0.2) { _settling = true; _settleFrom = Offset; _settleTo = to; _settleT0 = T; }
             T += 80;
             return SendInputBackend.DragOutcome.Ok;
         }
@@ -134,7 +162,8 @@ public static class DragPxSelfTest
 
     private sealed record Case(string Name, int Goal, double Start = 0, double Threshold = 10, double Ratio = 1, bool Jump = false, double Inertia = 0,
         double MaxOffset = 4000, bool Flat = false, double? WantMoved = null, string WantReason = "done", Func<int, int>? Cut = null,
-        SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused, Func<int, double>? Wobble = null, bool Fling = false);
+        SendInputBackend.DragOutcome CutOutcome = SendInputBackend.DragOutcome.Paused, Func<int, double>? Wobble = null, bool Fling = false,
+        bool Elastic = false, double SnapPitch = 0, bool SnapForward = false, int? MaxHold = null);
 
     private static void Loop()
     {
@@ -166,10 +195,17 @@ public static class DragPxSelfTest
             // 按速度的惯性（2026-11-23 真靶子 r3）：松手前停 150 ms 不够，松手后还滑三四十 px
             new Case("松手后按速度惯性滑（像 Unity 的列表） 拖 240", 240, Fling: true),
             new Case("松手后按速度惯性滑 向上拖 240", -240, Start: 600, Fling: true),
+            // 松手后自己挪的（2026-11-24，followups X16）：到头回弹、吸附到整行。回弹是往回动，和按住多久无关，停顿不能加长
+            new Case("到头回弹：最多还能走 250，要拖 720", 720, MaxOffset: 250, Elastic: true, WantMoved: 250, WantReason: "end", MaxHold: 150),
+            new Case("到头回弹：第一笔就到底，只剩 40", 720, Start: 760, MaxOffset: 800, Elastic: true, WantMoved: 40, WantReason: "end", MaxHold: 150),
+            new Case("到头回弹的列表 没到头 拖 240", 240, MaxOffset: 480, Elastic: true, MaxHold: 150),
+            new Case("就近吸附到整行（一行 120）拖 240", 240, SnapPitch: 120),            new Case("往前吸附到整行（一行 120）拖 240", 240, SnapPitch: 120, SnapForward: true),
+            new Case("往前吸附到整行（一行 120）向上拖 240", -240, Start: 600, SnapPitch: 120, SnapForward: true),
         };
         foreach (var c in cases)
         {
-            using var list = new FakeList(c.Flat ? flat : content, c.Start) { Threshold = c.Threshold, Ratio = c.Ratio, Jump = c.Jump, Inertia = c.Inertia, MaxOffset = c.MaxOffset, CutAfterSteps = c.Cut, CutOutcome = c.CutOutcome, Wobble = c.Wobble, Fling = c.Fling };
+            using var list = new FakeList(c.Flat ? flat : content, c.Start) { Threshold = c.Threshold, Ratio = c.Ratio, Jump = c.Jump, Inertia = c.Inertia, MaxOffset = c.MaxOffset, CutAfterSteps = c.Cut, CutOutcome = c.CutOutcome, Wobble = c.Wobble, Fling = c.Fling,
+                Elastic = c.Elastic, SnapPitch = c.SnapPitch, SnapForward = c.SnapForward };
             var dr = new DistanceDragger();
             var res = dr.RunAsync(c.Goal, 3, 870, list.Io(), CancellationToken.None).GetAwaiter().GetResult();
             double truth = list.Final - c.Start;
@@ -179,7 +215,7 @@ public static class DragPxSelfTest
             else
             {
                 double want = c.WantMoved is double w ? w * Math.Sign(c.Goal) : c.Goal;
-                ok = Math.Abs(truth - want) <= 3.5 && Math.Abs(res.Moved - truth) <= 2 && res.Reason == c.WantReason;
+                ok = Math.Abs(truth - want) <= 3.5 && Math.Abs(res.Moved - truth) <= 2 && res.Reason == c.WantReason && res.HoldMs <= (c.MaxHold ?? DistanceDragger.MaxHoldMs);
             }
             Check(c.Name, ok, $"真实 {truth:0.0}，自测 {res.Moved:0.0}，{res.Strokes} 笔，比例 {res.Gain?.ToString("0.00") ?? "-"}，门槛 {res.Threshold?.ToString("0.0") ?? "-"}，停顿 {res.HoldMs} ms，{res.Reason}");
         }
@@ -221,19 +257,23 @@ public static class DragPxSelfTest
         Check("到底以后余差清零", rEnd.Reason == "end" && d2.Carry == 0 && shortList.Offset == 500, $"{rEnd.Reason}，余差 {d2.Carry}，位置 {shortList.Offset:0}");
 
         // 照真靶子 r3 的程序在按速度惯性的列表上连拖 7 块（列表最多到 480）：每块停的位置、原因都要对
-        using var fling = new FakeList(content, 0) { Fling = true, MaxOffset = 480 };
-        var d3 = new DistanceDragger();
         var plan = new (int Dist, double Pos, string Reason)[] { (240, 240, "done"), (-100, 140, "done"), (720, 480, "end"), (-480, 0, "done"), (100, 100, "done"), (100, 200, "done"), (100, 300, "done") };
-        var got = new List<string>();
-        bool all = true;
-        foreach (var (dist, pos, reason) in plan)
+        void Chain(string name, FakeList list, int maxHold = DistanceDragger.MaxHoldMs)
         {
-            var r = d3.RunAsync(dist, 3, 870, fling.Io(), CancellationToken.None).GetAwaiter().GetResult();
-            bool ok = Math.Abs(fling.Final - pos) <= 3.5 && r.Reason == reason;
-            all &= ok;
-            got.Add($"{(ok ? "" : "✗")}{fling.Final:0}（{r.Strokes} 笔 {r.Reason}，停顿 {r.HoldMs}）");
+            var d = new DistanceDragger();
+            var got = new List<string>();
+            bool all = true;
+            foreach (var (dist, pos, reason) in plan)
+            {
+                var r = d.RunAsync(dist, 3, 870, list.Io(), CancellationToken.None).GetAwaiter().GetResult();
+                bool ok = Math.Abs(list.Final - pos) <= 3.5 && r.Reason == reason && r.HoldMs <= maxHold;
+                all &= ok;
+                got.Add($"{(ok ? "" : "✗")}{list.Final:0}（{r.Strokes} 笔 {r.Reason}，停顿 {r.HoldMs}）");
+            }
+            Check(name, all, string.Join("、", got));
         }
-        Check("惯性列表上照 r3 连拖 7 块", all, string.Join("、", got));
+        using (var fling = new FakeList(content, 0) { Fling = true, MaxOffset = 480 }) Chain("惯性列表上照 r3 连拖 7 块", fling);
+        using (var elastic = new FakeList(content, 0) { Elastic = true, MaxOffset = 480 }) Chain("到头回弹的列表上照 r3 连拖 7 块（停顿不加长）", elastic, 150);
     }
 
     // ── C：输入后端 ──

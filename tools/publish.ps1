@@ -1,10 +1,10 @@
 ﻿# 打包 视搭 VisionBlocks 的两种发布物 / Builds the two release artifacts:
 #   1) 便携文件夹 zip：自包含（带 .NET 运行时），解压双击即用，数据放在旁边的 data\（靠 portable.txt 认出来）
 #   2) 单个 exe：自包含 + 单文件 + 压缩，数据放「文档\VisionBlocks」，设置放 %AppData%\VisionBlocks
-# 用法 / Usage: powershell -ExecutionPolicy Bypass -File tools\publish.ps1 [-Version 0.2.1]
+# 用法 / Usage: powershell -ExecutionPolicy Bypass -File tools\publish.ps1 [-Version 0.3.0]
 # 需要 .NET 10 SDK；第一次运行会从 nuget.org 下载 Microsoft.NETCore.App.Runtime.win-x64 和 Microsoft.WindowsDesktop.App.Runtime.win-x64。
 # Needs the .NET 10 SDK; the first run downloads the win-x64 runtime packs from nuget.org.
-param([string]$Version = "0.2.1")
+param([string]$Version = "0.3.0")
 $ErrorActionPreference = "Stop"
 $vb = Split-Path -Parent $PSScriptRoot
 $skill = Split-Path -Parent $vb

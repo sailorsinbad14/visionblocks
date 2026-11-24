@@ -55,7 +55,7 @@ public static class DragPxSelfTest
         public bool Fling;
         private double _flingV, _flingOff0;
         private long _flingT0;
-        // 松手后自己挪到一个位置（2026-11-24，followups X16）：Elastic = 到头回弹（同 Unity 滚动列表的默认：拖过头的那段按橡皮筋算，越拉越拉不动，
+        // 松手后自己挪到一个位置（2026-11-24）：Elastic = 到头回弹（同 Unity 滚动列表的默认：拖过头的那段按橡皮筋算，越拉越拉不动，
         // 松手后弹回到头）；SnapPitch > 0 = 吸附到整行（SnapForward 往这一笔走的方向对齐，否则就近）。挪动按 SmoothDamp 先快后慢，约 0.1 秒；按下就停住
         public bool Elastic, SnapForward;
         public double SnapPitch;
@@ -195,7 +195,7 @@ public static class DragPxSelfTest
             // 按速度的惯性（2026-11-23 真靶子 r3）：松手前停 150 ms 不够，松手后还滑三四十 px
             new Case("松手后按速度惯性滑（像 Unity 的列表） 拖 240", 240, Fling: true),
             new Case("松手后按速度惯性滑 向上拖 240", -240, Start: 600, Fling: true),
-            // 松手后自己挪的（2026-11-24，followups X16）：到头回弹、吸附到整行。回弹是往回动，和按住多久无关，停顿不能加长
+            // 松手后自己挪的（2026-11-24）：到头回弹、吸附到整行。回弹是往回动，和按住多久无关，停顿不能加长
             new Case("到头回弹：最多还能走 250，要拖 720", 720, MaxOffset: 250, Elastic: true, WantMoved: 250, WantReason: "end", MaxHold: 150),
             new Case("到头回弹：第一笔就到底，只剩 40", 720, Start: 760, MaxOffset: 800, Elastic: true, WantMoved: 40, WantReason: "end", MaxHold: 150),
             new Case("到头回弹的列表 没到头 拖 240", 240, MaxOffset: 480, Elastic: true, MaxHold: 150),

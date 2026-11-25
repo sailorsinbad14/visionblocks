@@ -81,7 +81,7 @@ public static class UnsureSelfTest
             var (ed, _) = NewProgram(false);
             var (res, r, lines, csv) = Run(ed, null);
             Check("运行完成", res == "完成", res);
-            Check("两次都分不开，都没问", r.Unsures == 2 && Ev(lines, "unsureAsk") == 0 && Has(lines, "\"how\":\"auto\""), $"分不开 {r.Unsures} 次");
+            Check("两次都分不开，都没问，都算没人确认", r.Unsures == 2 && r.UnsureUnanswered == 2 && Ev(lines, "unsureAsk") == 0 && Has(lines, "\"how\":\"auto\""), $"分不开 {r.Unsures} 次");
             Check("表里写的是「1天?」，第二次按去重跳过", csv.Contains("1天?") && r.RowsRecorded == 1 && r.Duplicates == 1, $"{r.RowsRecorded} 行，跳过 {r.Duplicates}");
         }
 
@@ -110,7 +110,7 @@ public static class UnsureSelfTest
         {
             var (ed, _) = NewProgram(false);
             var (res, r, lines, _) = Run(ed, (q, ct) => Task.FromResult<UnsureAnswer?>(new UnsureAnswer(null, Stop: true)));
-            Check("结果是「在确认框里停止了运行」，一行没记", res.Contains("确认框里停止") && r.RowsRecorded == 0 && Has(lines, "\"how\":\"stop\""), res);
+            Check("结果是「在确认框里停止了运行」，一行没记，不算没人确认", res.Contains("确认框里停止") && r.RowsRecorded == 0 && r.UnsureUnanswered == 0 && Has(lines, "\"how\":\"stop\""), res);
         }
 
         Console.WriteLine("4. 填新名字「7天」并存成模板：只问一次，以后自动认；「重复直到」的超时不算等用户的时间");

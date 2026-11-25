@@ -116,8 +116,8 @@ internal sealed class StudioRun
             + (runner.EmptyKeys > 0 ? $"；去重字段读空 {runner.EmptyKeys} 次（改按图片和其他字段区分，名称框可能太紧）" : "")
             + (runner.Rereads > 0 ? $"；读空后放大再读 {runner.Rereads} 次，读出字 {runner.RereadHits} 次" : "")
             + (runner.Classifies > 0 ? $"；认图案 {runner.Classifies} 次" + (runner.PatternClose + runner.PatternMidway > 0
-                ? $"（分不太开 {runner.PatternClose} 次、有点像但没过门槛 {runner.PatternMidway} 次：可能有还没裁模板的新图案，看活动里的提醒；"
-                  + UnsureSummary(runner) + "）" : "") : "");
+                ? $"（分不太开 {runner.PatternClose} 次、有点像但没过门槛 {runner.PatternMidway} 次：可能有还没裁模板的新图案，看活动里的提醒"
+                  + (UnsureSummary(runner) is { Length: > 0 } us ? "；" + us : "") + "）" : "") : "");
         log.Dispose();
         try { File.Copy(botPath, Path.Combine(OutDir, $"bot-{DateTime.Now:HHmmss}.jsonl"), true); } catch { }
         return summary;
@@ -126,12 +126,11 @@ internal sealed class StudioRun
     /// <summary>认图案分不开时各种结果的次数：你确认了 / 你选了先记下 / 同一张图用了上次的结果 / 没人确认。</summary>
     private static string UnsureSummary(ProgramRunner r)
     {
-        int none = r.Unsures - r.UnsureAnswered - r.UnsureSkipped - r.UnsureRemembered;
         var parts = new List<string>();
         if (r.UnsureAnswered > 0) parts.Add($"你确认了 {r.UnsureAnswered} 次");
         if (r.UnsureSkipped > 0) parts.Add($"你选了先记下 {r.UnsureSkipped} 次");
         if (r.UnsureRemembered > 0) parts.Add($"同一张图用了上次的结果 {r.UnsureRemembered} 次");
-        if (none > 0) parts.Add($"{none} 次没人确认、先记成带问号的值或「未认出」");
+        if (r.UnsureUnanswered > 0) parts.Add($"{r.UnsureUnanswered} 次没人确认、先记成带问号的值或「未认出」");
         return string.Join("，", parts);
     }
 

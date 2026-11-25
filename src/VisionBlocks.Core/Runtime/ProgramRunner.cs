@@ -80,9 +80,9 @@ public sealed class ProgramRunner : IDisposable
     public int Classifies, PatternClose, PatternMidway, Rereads, RereadHits;
     /// <summary>
     /// 认图案分不开的次数（= 分不太开 + 有点像但没过门槛）；其中用户确认了值的、点了「先记下」的、
-    /// 和前面问过的是同一张图、直接用上次答案的次数。剩下的是没人确认（vbrun、设置成不问、超时）。
+    /// 和前面问过的是同一张图、直接用上次答案的次数；没人确认（vbrun、设置成不问、超时）的次数。问到一半运行被停的不算进后面几种。
     /// </summary>
-    public int Unsures, UnsureAnswered, UnsureSkipped, UnsureRemembered;
+    public int Unsures, UnsureAnswered, UnsureSkipped, UnsureRemembered, UnsureUnanswered;
     public int RowsRecorded => _rec?.Rows ?? 0;
     public int Duplicates => _rec?.Duplicates ?? 0;
     public int EmptyKeys => _rec?.EmptyKeys ?? 0;
@@ -122,7 +122,7 @@ public sealed class ProgramRunner : IDisposable
         {
             int released = _c.Input.ReleaseAll();
             _c.Log.Write(new { ev = "runEnd", result, released, Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads, rows = RowsRecorded, dups = Duplicates, emptyKeys = EmptyKeys,
-                Classifies, PatternClose, PatternMidway, Unsures, UnsureAnswered, UnsureSkipped, UnsureRemembered, Rereads, RereadHits, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
+                Classifies, PatternClose, PatternMidway, Unsures, UnsureAnswered, UnsureSkipped, UnsureRemembered, UnsureUnanswered, Rereads, RereadHits, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
             _rec?.Dispose();
             try { Manifest?.Finish(status, RowsRecorded, Duplicates, EmptyKeys); }
             catch (Exception e) { _c.Log.Write(new { ev = "manifestFailed", error = e.Message, t = BotLog.Now }); }
@@ -739,6 +739,7 @@ public sealed class ProgramRunner : IDisposable
         if (_c.AskUnsure == null)
         {
             key.Dispose();   // 不问时结果每次都一样，不用记
+            UnsureUnanswered++;
             _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "auto", value = fallback, t = BotLog.Now });
             return fallback;
         }
@@ -776,7 +777,7 @@ public sealed class ProgramRunner : IDisposable
         if (ans == null || ans.Skipped || string.IsNullOrWhiteSpace(ans.Value))
         {
             bool skipped = ans != null;
-            if (skipped) UnsureSkipped++;
+            if (skipped) UnsureSkipped++; else UnsureUnanswered++;
             _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = skipped ? "skip" : "timeout", value = fallback, ms, t = BotLog.Now });
             Publish($"{cl.Field}：{fallback}（{(skipped ? "你选了先这样记" : "没人确认，先这样记")}，接着跑）");
             return Remember(fallback);

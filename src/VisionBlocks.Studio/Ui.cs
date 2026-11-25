@@ -394,7 +394,7 @@ internal static class Ui
         sp.Children.Add(sticky);
 
         // 认图案分不开时（2026-11-25）：问不问、等多久。运行开始时读，运行中改了下次运行生效
-        Head("search", L.T("unsureMode"));
+        Head("template", L.T("unsureMode"));
         sp.Children.Add(Label(L.T("unsureModeNote"), 12, (Brush)Theme["Text2"]));
         var um = new StackPanel { Margin = new Thickness(0, 8, 0, 14) };
         AutomationProperties.SetAutomationId(um, "unsureMode");
@@ -410,7 +410,7 @@ internal static class Ui
         urWait.Margin = new Thickness(0, 0, 0, 6);
         um.Children.Add(urWait);
         var urTimeout = UR("timeout", L.T("unsureTimeoutA"), "unsureTimeout");
-        var mins = new TextBox { Text = s.UnsureMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture), Width = 40, Margin = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var mins = new TextBox { Text = s.UnsureMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture), Width = 60, Padding = new Thickness(2, 2, 2, 2), Margin = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         AutomationProperties.SetAutomationId(mins, "unsureMinutes");
         AutomationProperties.SetName(mins, L.T("unsureTimeoutB"));
         mins.TextChanged += (_, _) =>
@@ -472,8 +472,14 @@ internal static class Ui
         var close = new Button { Content = L.T("close"), IsCancel = true, IsDefault = true, Width = 96, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0), Style = (Style)Theme["InkButton"] };
         AutomationProperties.SetAutomationId(close, "settingsClose");
         close.Click += (_, _) => w.Close();
-        sp.Children.Add(close);
-        w.Content = sp;
+        // 2026-11-25：加了「认图案分不开时」以后设置比 1080p 屏幕的工作区还高：内容放进滚动区，「关闭」钉在底下，窗口不超过工作区
+        close.Margin = new Thickness(0, 10, 24, 16);
+        DockPanel.SetDock(close, Dock.Bottom);
+        var root = new DockPanel();
+        root.Children.Add(close);
+        root.Children.Add(new ScrollViewer { Content = sp, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        w.MaxHeight = SystemParameters.WorkArea.Height - 16;
+        w.Content = root;
         w.ShowDialog();
     }
 

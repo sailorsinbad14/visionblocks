@@ -20,6 +20,7 @@ public sealed class InventoryView : FrameworkElement
     private static readonly Pen AxisPen = Frozen(new Pen(B(0x56, 0x65, 0x6F), 2));
     private static readonly Brush BarFill = B(0x8A, 0xA4, 0xB4);
     private static readonly Brush[] IconColors = { B(216, 60, 60), B(60, 179, 113), B(66, 133, 244), B(224, 176, 0), B(160, 90, 220), B(0, 170, 190) };
+    private static readonly Brush[] BadgeBg = { B(200, 50, 60), B(47, 93, 168) };
     private static readonly Typeface Ui = new(new FontFamily("Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface UiBold = new(new FontFamily("Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
 
@@ -62,6 +63,15 @@ public sealed class InventoryView : FrameworkElement
         }
     }
 
+    /// <summary>图片右下角的角标（2026-11-25，--twins）：固定大小的圆角底块加居中的字，不同角标只差字或底色。</summary>
+    private void Badge(DrawingContext dc, InventoryScene.Item it, Rect box, double h, double font)
+    {
+        if (string.IsNullOrEmpty(it.Badge)) return;
+        var r = new Rect(box.Right - 2 * h - 8, box.Bottom - h - 8, 2 * h, h);
+        dc.DrawRoundedRectangle(BadgeBg[it.BadgeColor % BadgeBg.Length], null, r, 4, 4);
+        Centered(dc, it.Badge, font, Brushes.White, r, true);
+    }
+
     protected override void OnRender(DrawingContext dc)
     {
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
@@ -89,6 +99,7 @@ public sealed class InventoryView : FrameworkElement
             if (r.Bottom < InventoryScene.Viewport.Top || r.Top > InventoryScene.Viewport.Bottom) continue;
             dc.DrawRectangle(CellBg, BoxPen, r);
             Icon(dc, it.Shape, it.Color, new Point(r.X + r.Width / 2, r.Y + r.Height / 2), 110);
+            Badge(dc, it, r, 30, 19);
         }
         dc.Pop();
 
@@ -135,6 +146,7 @@ public sealed class InventoryView : FrameworkElement
         dc.DrawRectangle(Brushes.White, InkPen, InventoryScene.Picture);
         var pc = InventoryScene.Picture;
         Icon(dc, it.Shape, it.Color, new Point(pc.X + pc.Width / 2, pc.Y + pc.Height / 2), 220);
+        Badge(dc, it, pc, 40, 26);
         Centered(dc, it.Name, 40, Ink, new Rect(1290, 500, 400, 64), true);
         Centered(dc, $"库存 {it.Stock}", 34, Ink, new Rect(1290, 580, 400, 56));
     }

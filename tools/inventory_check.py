@@ -6,6 +6,9 @@
 硬指标：每个物品恰好记一次、没有重复行、没有拦截和点空。
 2026-11-22 加一条：工具按下的键和鼠标都松开了（看 bot.jsonl，不看靶子收到的按键，理由见 main 里的注释）。
 识别准确率（名称、库存、分类）只如实报告，不预设门槛。
+2026-11-25：靶子加了 --twins（同名物品只差图片角标），物品改按「分类 + 第几件」认，不再按名字。
+结果表里有「有效期」列时，对角标：1天 / 3天 → 同名；红底、蓝底「限时」→「限时红」「限时蓝」；没角标 →「无」。
+「7天」故意不裁模板（测「没见过的角标」），不算进硬指标，单独报告它被记成了什么。
 """
 import csv
 import json
@@ -47,7 +50,9 @@ def main(run: Path) -> int:
         print("truth.jsonl 里没有 items 记录（不是背包场景？）")
         return 2
     items = truth["items"]
-    by_name = {it["name"]: it for it in items}
+    key = lambda it: (it["cat"], it["idx"])   # 同名物品（--twins）只能按「分类 + 第几件」区分
+    by_key = {key(it): it for it in items}
+    untemplated = [it for it in items if it.get("badge") == "7天"]
 
     csvs = sorted(run.glob("data.csv")) + sorted(run.glob("data-*/data.csv"))
     if not csvs:
@@ -72,21 +77,21 @@ def main(run: Path) -> int:
                 print(f"（运行开始前手动打开过 {manual} 次详情，不参与配对）")
     marks = [json.loads(l)["ev"] for l in bot.read_text(encoding="utf-8").splitlines() if '"ev":"row"' in l or '"ev":"dup"' in l] if bot else []
     paired = len(opens) == len(marks)
-    src = [o["name"] for o, m in zip(opens, marks) if m == "row"] if paired else []
-    recorded = sorted(set(src))
-    missing = [it for it in items if it["name"] not in src] if paired else []
-    twice = sorted({n for n in src if src.count(n) > 1})
+    src = [by_key[(o["cat"], o["idx"])] for o, m in zip(opens, marks) if m == "row"] if paired else []
+    src_keys = [key(it) for it in src]
+    missing = [it for it in items if key(it) not in src_keys and it not in untemplated] if paired else []
+    twice = sorted({k for k in src_keys if src_keys.count(k) > 1})
 
-    names = [r.get("名称", "") for r in rows]
-    name_ok = sum(1 for r, n in zip(rows, src) if r.get("名称") == n)
-    stock_ok = sum(1 for r, n in zip(rows, src) if r.get("库存") == str(by_name[n]["stock"]))
-    cat_ok = sum(1 for r, n in zip(rows, src) if r.get("分类") == by_name[n]["cat"])
+    name_ok = sum(1 for r, it in zip(rows, src) if r.get("名称") == it["name"])
+    stock_ok = sum(1 for r, it in zip(rows, src) if r.get("库存") == str(it["stock"]))
+    cat_ok = sum(1 for r, it in zip(rows, src) if r.get("分类") == it["cat"])
     imgs_ok = sum(1 for r in rows if r.get("图片") and (csvs[-1].parent / r["图片"]).exists())
 
     print(f"结果表：{csvs[-1]}")
-    print(f"靶子物品 {len(items)} 个；结果表 {len(rows)} 行；打开详情 {len(opens)} 次，工具记录/跳过 {len(marks)} 次（{'能逐次配对' if paired else '对不上，无法配对'}）")
+    print(f"靶子物品 {len(items)} 个{'（含同名物品）' if truth.get('twins') else ''}；结果表 {len(rows)} 行；打开详情 {len(opens)} 次，工具记录/跳过 {len(marks)} 次（{'能逐次配对' if paired else '对不上，无法配对'}）")
     once = paired and not missing and not twice and len(rows) == len(src)
-    print(f"[硬指标] 每个物品恰好记一次：{'通过' if once else '不通过'}（漏记 {len(missing)}，同一物品记了两次 {len(twice)}）")
+    print(f"[硬指标] 每个物品恰好记一次：{'通过' if once else '不通过'}（漏记 {len(missing)}，同一物品记了两次 {len(twice)}"
+          + (f"；「7天」{len(untemplated)} 件不算，见下面" if untemplated else "") + "）")
     # 卡键看工具自己的日志：靶子那边的「按下没收到松开」也可能是用户自己按的键（比如急停热键的 Ctrl、Alt），
     # 或者工具发了松开、但那一刻前台已经换成别的窗口（2026-11-22 实测两种都出现过），都不是工具卡键
     pressed, left = bot_keys(bot) if bot else (set(), None)
@@ -107,17 +112,33 @@ def main(run: Path) -> int:
         if mine and left == 0:
             print(f"  {'、'.join(mine)}：工具按过，也发了松开；松开时前台已经不是靶子，消息送到了别的窗口，系统里这个键已经松开")
     print(f"[识别] 名称完全一致 {name_ok}/{len(src)}；库存一致 {stock_ok}/{len(src)}；分类一致 {cat_ok}/{len(src)}；图片文件存在 {imgs_ok}/{len(rows)}")
-    for r, n in zip(rows, src):
-        if r.get("名称") != n:
-            print(f"  名称读错：「{n}」读成「{r.get('名称')}」")
-    for r, n in zip(rows, src):
-        if r.get("库存") != str(by_name[n]["stock"]):
-            print(f"  库存读错：{n} 读成「{r.get('库存')}」，应为 {by_name[n]['stock']}")
-    wrong_cat = sorted({(r.get("分类"), by_name[n]["cat"]) for r, n in zip(rows, src) if r.get("分类") != by_name[n]["cat"]})
+    for r, it in zip(rows, src):
+        if r.get("名称") != it["name"]:
+            print(f"  名称读错：「{it['name']}」读成「{r.get('名称')}」")
+    for r, it in zip(rows, src):
+        if r.get("库存") != str(it["stock"]):
+            print(f"  库存读错：{it['name']} 读成「{r.get('库存')}」，应为 {it['stock']}")
+    wrong_cat = sorted({(r.get("分类"), it["cat"]) for r, it in zip(rows, src) if r.get("分类") != it["cat"]})
     for got, want in wrong_cat:
         print(f"  分类读错：「{want}」读成「{got}」")
+    if rows and "有效期" in rows[0]:
+        def want_badge(it):
+            b = it.get("badge", "")
+            if b == "限时":
+                return "限时蓝" if it.get("badgeColor") == 1 else "限时红"
+            return b or "无"
+        checked = [(r, it) for r, it in zip(rows, src) if it not in untemplated]
+        badge_ok = sum(1 for r, it in checked if r.get("有效期") == want_badge(it))
+        print(f"[识别] 有效期（角标）一致 {badge_ok}/{len(checked)}")
+        for r, it in checked:
+            if r.get("有效期") != want_badge(it):
+                print(f"  角标认错：{it['cat']}#{it['idx']} {it['name']} 应为「{want_badge(it)}」，认成「{r.get('有效期')}」")
+    for it in untemplated:
+        got = [r.get("有效期", "?") for r, s in zip(rows, src) if key(s) == key(it)]
+        print(f"[参考] 没裁模板的「7天」{it['cat']}#{it['idx']} {it['name']}："
+              + (f"记成一行，有效期「{got[0]}」" if got else "没单独记一行（被当成重复了），看 bot.jsonl 里的提醒"))
     for it in missing:
-        print(f"  漏记：{it['cat']}#{it['idx']} {it['name']}")
+        print(f"  漏记：{it['cat']}#{it['idx']} {it['name']}{'（角标 ' + it['badge'] + '）' if it.get('badge') else ''}")
     hard_ok = once and stray == 0 and not left
     return 0 if hard_ok else 1
 

@@ -10,7 +10,9 @@ namespace BenchTarget;
 /// </summary>
 public sealed class InventoryScene
 {
-    public sealed record Item(int Cat, int Idx, string Name, int Stock, int[] Prices, int[] Vols, int Shape, int Color);
+    /// <param name="Badge">图片右下角的角标文字（2026-11-25，--twins）；空 = 没角标。</param>
+    /// <param name="BadgeColor">角标底色：0 红、1 蓝（字一样、只差底色的那一对用）。</param>
+    public sealed record Item(int Cat, int Idx, string Name, int Stock, int[] Prices, int[] Vols, int Shape, int Color, string Badge = "", int BadgeColor = 0);
 
     public static readonly string[] Categories = { "武器", "防具", "药品", "材料" };
     private static readonly int[] Counts = { 13, 9, 6, 18 };
@@ -56,13 +58,13 @@ public sealed class InventoryScene
 
     private readonly TruthLog _log;
     private readonly double _dragThreshold, _dragRatio;
-    private readonly bool _dragInertia;
+    private readonly bool _dragInertia, _naturalEnd;
 
     public InventoryScene(TargetOptions opt, TruthLog log)
     {
         _log = log;
         ScrollStep = opt.ScrollStep > 0 ? opt.ScrollStep : (int)PitchY;
-        _dragThreshold = opt.DragThreshold; _dragRatio = opt.DragRatio; _dragInertia = opt.DragInertia;
+        _dragThreshold = opt.DragThreshold; _dragRatio = opt.DragRatio; _dragInertia = opt.DragInertia; _naturalEnd = opt.NaturalEnd;
         var rng = new Random(opt.Seed);
         for (int c = 0; c < Categories.Length; c++)
         {
@@ -74,17 +76,49 @@ public sealed class InventoryScene
                 Items.Add(new Item(c, i, combos[i], rng.Next(1, 100), prices, vols, rng.Next(6), rng.Next(6)));
             }
         }
+        if (opt.Twins) AddTwins(opt.Seed);
         _log.Write(new
         {
             ev = "items", scrollStep = ScrollStep, dragThreshold = _dragThreshold, dragRatio = _dragRatio, dragInertia = _dragInertia,
-            items = Items.Select(it => new { cat = Categories[it.Cat], idx = it.Idx, name = it.Name, stock = it.Stock, prices = it.Prices, vols = it.Vols, shape = it.Shape, color = it.Color })
+            twins = opt.Twins, naturalEnd = _naturalEnd,
+            items = Items.Select(it => new { cat = Categories[it.Cat], idx = it.Idx, name = it.Name, stock = it.Stock, prices = it.Prices, vols = it.Vols, shape = it.Shape, color = it.Color, badge = it.Badge, badgeColor = it.BadgeColor })
         });
         if (opt.OpenItem >= 0) Open = InCategory(0).ElementAtOrDefault(opt.OpenItem);
     }
 
+    /// <summary>
+    /// 同名物品（2026-11-25，--twins）：每个分类第 1 件加角标「1天」，紧跟一件同名同图、没角标的，分类末尾再放一件「3天」（库存也一样，只差角标）
+    /// 和一件「7天」（给工具测「没裁过模板的角标」）；第 2 件加红底「限时」，紧跟一件同名同图、蓝底「限时」（字一样、只差底色）。
+    /// 不动原来的随机序列：没加 --twins 时物品和以前逐个一样。
+    /// </summary>
+    private void AddTwins(int seed)
+    {
+        var rng = new Random(seed ^ 0x7A15);
+        var all = new List<Item>();
+        for (int c = 0; c < Categories.Length; c++)
+        {
+            var list = InCategory(c).ToList();
+            var a = list[0] with { Badge = "1天" };
+            var b = list[1] with { Badge = "限时" };
+            var cat = new List<Item> { a, a with { Badge = "", Stock = rng.Next(1, 100) }, b, b with { BadgeColor = 1, Stock = rng.Next(1, 100) } };
+            cat.AddRange(list.Skip(2));
+            cat.Add(a with { Badge = "3天" });
+            cat.Add(a with { Badge = "7天", Stock = rng.Next(1, 100) });
+            all.AddRange(cat.Select((it, i) => it with { Idx = i }));
+        }
+        Items.Clear();
+        Items.AddRange(all);
+    }
+
     public IEnumerable<Item> InCategory(int c) => Items.Where(i => i.Cat == c);
     private int RowsIn(int c) => (InCategory(c).Count() + Cols - 1) / Cols;
-    public double MaxOffset => Math.Max(0, RowsIn(Category) - VisibleRows) * PitchY;
+    /// <summary>
+    /// 最多能滚多远。默认 =（行数 − 3）整行，到底时正好对齐；--natural-end（2026-11-25）停在「内容高 − 可视高」：
+    /// 内容高 = 上下各留 20 + 行数 × 行距 − 最后一行下面的间距，和真实列表一样一般不是整行（武器 4 行只能滚 90）。
+    /// </summary>
+    public double MaxOffset => _naturalEnd
+        ? Math.Max(0, 2 * ContentPad + RowsIn(Category) * PitchY - (PitchY - CellH) - Viewport.Height)
+        : Math.Max(0, RowsIn(Category) - VisibleRows) * PitchY;
 
     /// <summary>第 idx 个物品格在屏幕上的位置（已减去滚动量，可能在视口外）。</summary>
     public Rect CellRect(int idx) => new(GridX + idx % Cols * PitchX, Viewport.Y + ContentPad + idx / Cols * PitchY - Offset, CellW, CellH);
@@ -115,7 +149,7 @@ public sealed class InventoryScene
                     {
                         hit = "cell:" + it.Idx;
                         Open = it; Opens++; OpenedSet.Add((it.Cat, it.Idx));
-                        _log.Write(new { ev = "open", cat = Categories[it.Cat], idx = it.Idx, name = it.Name, t = qpc });
+                        _log.Write(new { ev = "open", cat = Categories[it.Cat], idx = it.Idx, name = it.Name, badge = it.Badge, t = qpc });
                     }
             }
         }

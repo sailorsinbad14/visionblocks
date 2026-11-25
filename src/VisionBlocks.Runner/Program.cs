@@ -65,6 +65,8 @@ public static class Program
         foreach (var k in new[] { "scene", "open-item", "scroll-step", "drag-threshold", "drag-ratio" })
             if (o.TryGetValue(k, out var v)) s += $" --{k} {v}";
         if (o.ContainsKey("drag-inertia")) s += " --drag-inertia";   // 背包的按住拖动（2026-11-23）：松手后惯性
+        foreach (var k in new[] { "twins", "natural-end" })          // 背包的同名物品、真实到底位置（2026-11-25）
+            if (o.ContainsKey(k)) s += " --" + k;
         return s;
     }
 

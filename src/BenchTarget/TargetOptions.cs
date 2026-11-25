@@ -24,6 +24,9 @@ public sealed class TargetOptions
     public double DragThreshold = 10;    // 门槛（基准像素）；0 = 关掉拖动，恢复「一按下就点开」的旧行为
     public double DragRatio = 1;         // 拖 1 像素列表动几像素（1 = 跟手；大于 1 模拟拖滚动条）
     public bool DragInertia = false;     // 松手后按松手时的速度再滑一段（每秒剩 13.5%，和常见 UI 库的默认值一样）
+    // 背包的同名物品和真实到底位置（2026-11-25）
+    public bool Twins = false;           // 每个分类加几件同名同图、只有图片角标不同的物品（1天 / 3天 / 7天 / 没角标 / 只差底色）
+    public bool NaturalEnd = false;      // 到底停在「内容高 − 可视高」（真实列表的样子），不再凑成整行
 
     public static TargetOptions Parse(string[] args)
     {
@@ -55,6 +58,8 @@ public sealed class TargetOptions
                 case "--drag-threshold": o.DragThreshold = double.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--drag-ratio": o.DragRatio = double.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--drag-inertia": o.DragInertia = true; break;
+                case "--twins": o.Twins = true; break;
+                case "--natural-end": o.NaturalEnd = true; break;
                 default: throw new ArgumentException($"未知参数 {a}");
             }
         }

@@ -38,7 +38,9 @@ internal sealed class StudioRun
     public bool HotkeysFailed { get; private set; }
 
     /// <summary>必须在 UI 线程上调用（遮罩是本线程的 WPF 窗口）。</summary>
-    public async Task<string> RunAsync(ProgramEditor ed, IntPtr hwnd, Action<string> onLog, Action<string> onStatus)
+    /// <param name="askUnsure">认图案分不开时问用户（编辑器弹确认框）；null = 不问，直接记下接着跑（设置里选了「不问」）。</param>
+    public async Task<string> RunAsync(ProgramEditor ed, IntPtr hwnd, Action<string> onLog, Action<string> onStatus,
+        Func<UnsureRequest, CancellationToken, Task<UnsureAnswer?>>? askUnsure = null)
     {
         Directory.CreateDirectory(OutDir);
         string botPath = Path.Combine(OutDir, "bot.jsonl");
@@ -80,7 +82,7 @@ internal sealed class StudioRun
             Program = ed.Program, ProgramDir = ed.Dir, Source = source, Input = input, Log = log,
             TargetHwnd = hwnd, Overlay = overlay, IsPaused = () => _paused, PauseKey = hotkeys.PauseKey,
             OutputDir = DataDir,   // 每次运行一个结果目录，不覆盖上一次的表
-            ProgramPath = ed.ProgramPath
+            ProgramPath = ed.ProgramPath, AskUnsure = askUnsure
         });
         var sw = Stopwatch.StartNew();
         string result;
@@ -114,7 +116,9 @@ internal sealed class StudioRun
             + (runner.EmptyKeys > 0 ? $"；去重字段读空 {runner.EmptyKeys} 次（改按图片和其他字段区分，名称框可能太紧）" : "")
             + (runner.Rereads > 0 ? $"；读空后放大再读 {runner.Rereads} 次，读出字 {runner.RereadHits} 次" : "")
             + (runner.Classifies > 0 ? $"；认图案 {runner.Classifies} 次" + (runner.PatternClose + runner.PatternMidway > 0
-                ? $"（分不太开 {runner.PatternClose} 次、有点像但没过门槛 {runner.PatternMidway} 次：可能有还没裁模板的新图案，看活动里的提醒）" : "") : "");
+                ? $"（分不太开 {runner.PatternClose} 次、有点像但没过门槛 {runner.PatternMidway} 次：可能有还没裁模板的新图案，看活动里的提醒；"
+                  + (runner.UnsureAnswered > 0 ? $"你确认了 {runner.UnsureAnswered} 次" : "")
+                  + (runner.Unsures - runner.UnsureAnswered > 0 ? $"{(runner.UnsureAnswered > 0 ? "，" : "")}{runner.Unsures - runner.UnsureAnswered} 次没人确认、先记成带问号的值或「未认出」" : "") + "）" : "") : "");
         log.Dispose();
         try { File.Copy(botPath, Path.Combine(OutDir, $"bot-{DateTime.Now:HHmmss}.jsonl"), true); } catch { }
         return summary;

@@ -25,9 +25,29 @@ public sealed class RunContext
     public string? OutputDir { get; init; }
     /// <summary>程序文件路径，写进 manifest.json。</summary>
     public string? ProgramPath { get; init; }
+    /// <summary>
+    /// 认图案分不开（第一、二名分数太近，或者有点像但没过门槛）时问用户（2026-11-25）。编辑器弹确认框：运行停在这里，按键都松开，靶子停在这一页。
+    /// 返回 null（设置成不问、等太久没人答）就写一个不会和认出来的值撞的值（「1天?」「未认出」）接着跑，这一行留在表里。vbrun 不设，等于不问。
+    /// </summary>
+    public Func<UnsureRequest, CancellationToken, Task<UnsureAnswer?>>? AskUnsure { get; init; }
 }
 
 public readonly record struct CondResult(bool Hit, string Detail);
+
+/// <summary>认图案分不开时问用户的内容（2026-11-25）。</summary>
+/// <param name="Candidates">每张模板：模板名、写进字段的值、分数（从高到低）。</param>
+/// <param name="Fallback">没人确认时写的值（「1天?」「未认出」）。</param>
+/// <param name="Row">这一行到现在为止读到的各字段（让用户知道是哪件物品）。</param>
+/// <param name="RegionPng">认图案的热区截图（PNG）。</param>
+/// <param name="BadgePng">分数最高那张模板匹配到的那一块（PNG，基准尺寸）：用户要「存成新模板」时存的就是它。</param>
+/// <param name="BadgeInRegion">那一块在热区截图里的位置（截图像素）。</param>
+public sealed record UnsureRequest(ClassifyBlock Block, IReadOnlyList<(string Template, string Value, double Score)> Candidates, bool Close, string Fallback,
+    IReadOnlyDictionary<string, string> Row, byte[] RegionPng, byte[]? BadgePng, (int X, int Y, int W, int H)? BadgeInRegion);
+
+/// <param name="Value">写进字段的值；null = 没人答（超时），按「不问」处理。</param>
+/// <param name="NewTemplate">用户存成了新模板：模板名（已经加进程序和这块认图案，运行器把它载进来）。</param>
+/// <param name="Stop">用户点了「停止运行」。</param>
+public sealed record UnsureAnswer(string? Value, string? NewTemplate = null, bool Stop = false);
 
 /// <summary>
 /// 积木解释器。按「独立任务」模型来跑：
@@ -57,6 +77,8 @@ public sealed class ProgramRunner : IDisposable
     public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads;
     /// <summary>认图案的次数、其中分不太开的、有点像但没过门槛的；读文字读空后重读的次数、重读读出字的次数（2026-11-25）。</summary>
     public int Classifies, PatternClose, PatternMidway, Rereads, RereadHits;
+    /// <summary>认图案分不开的次数（= 分不太开 + 有点像但没过门槛）；其中用户在确认框里答了的次数。</summary>
+    public int Unsures, UnsureAnswered;
     public int RowsRecorded => _rec?.Rows ?? 0;
     public int Duplicates => _rec?.Duplicates ?? 0;
     public int EmptyKeys => _rec?.EmptyKeys ?? 0;
@@ -64,6 +86,10 @@ public sealed class ProgramRunner : IDisposable
     public ResultManifest? Manifest { get; private set; }
 
     private sealed class StopSignal : Exception { }
+    private sealed class UserStopSignal : Exception { }
+
+    /// <summary>认图案分不开、又没人确认时写的值：分数太近写「第一名?」，有点像但没过门槛写「未认出」——都不会和认出来的值撞，这一行不会被去重并掉。</summary>
+    public static string UnsureValue(PatternClassifier.Result r) => r.Close ? r.Value + "?" : "未认出";
 
     public ProgramRunner(RunContext c)
     {
@@ -87,11 +113,12 @@ public sealed class ProgramRunner : IDisposable
         try { await ExecList(_c.Program.Program, ct); status = "done"; }
         catch (OperationCanceledException) { result = "已取消"; status = "cancelled"; }
         catch (StopSignal) { result = "遇到「停止」积木"; status = "stoppedByBlock"; }
+        catch (UserStopSignal) { result = "你在认图案确认框里停止了运行"; status = "stoppedByUser"; }
         finally
         {
             int released = _c.Input.ReleaseAll();
             _c.Log.Write(new { ev = "runEnd", result, released, Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads, rows = RowsRecorded, dups = Duplicates, emptyKeys = EmptyKeys,
-                Classifies, PatternClose, PatternMidway, Rereads, RereadHits, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
+                Classifies, PatternClose, PatternMidway, Unsures, UnsureAnswered, Rereads, RereadHits, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
             _rec?.Dispose();
             try { Manifest?.Finish(status, RowsRecorded, Duplicates, EmptyKeys); }
             catch (Exception e) { _c.Log.Write(new { ev = "manifestFailed", error = e.Message, t = BotLog.Now }); }
@@ -124,7 +151,7 @@ public sealed class ProgramRunner : IDisposable
             case RepeatUntilBlock ru:
             {
                 var sw = Stopwatch.StartNew();
-                long lastCheck = long.MinValue / 2;
+                long lastCheck = long.MinValue / 2, held0 = _heldMs;
                 while (true)
                 {
                     if (ru.CheckEveryMs <= 0 || sw.ElapsedMilliseconds - lastCheck >= ru.CheckEveryMs)
@@ -132,9 +159,9 @@ public sealed class ProgramRunner : IDisposable
                         lastCheck = sw.ElapsedMilliseconds;
                         if ((await Eval(ru.Until, ct)).Hit) break;
                     }
-                    if (ru.TimeoutMs > 0 && sw.ElapsedMilliseconds > ru.TimeoutMs)
+                    if (ru.TimeoutMs > 0 && sw.ElapsedMilliseconds - (_heldMs - held0) > ru.TimeoutMs)
                     {
-                        _c.Log.Write(new { ev = "loopTimeout", ms = sw.ElapsedMilliseconds, t = BotLog.Now });
+                        _c.Log.Write(new { ev = "loopTimeout", ms = sw.ElapsedMilliseconds, held = _heldMs - held0, t = BotLog.Now });
                         break;
                     }
                     if (ru.Body.Count == 0) await WaitNextFrame(ct, 50);
@@ -314,7 +341,6 @@ public sealed class ProgramRunner : IDisposable
                 var f = await CurrentFrame(ct);
                 var roi = Region(cl.Region);
                 var res = PatternClassifier.Classify(f, roi, cl.Templates.Select(n => (n, PatternClassifier.ValueOf(_c.Program, n), _templates[n])).ToList(), cl.Threshold, cl.NoneText);
-                _rec?.Set(cl.Field, res.Value);
                 Classifies++;
                 if (res.Close) PatternClose++;
                 if (res.Midway) PatternMidway++;
@@ -328,6 +354,8 @@ public sealed class ProgramRunner : IDisposable
                 SetBox("roi:" + cl.Region, new OverlayBox(roi, $"{cl.Field}：{res.Value}", "region"));
                 if (res.Winner?.Box is { } wb) SetBox("match:classify", new OverlayBox(wb, $"{res.Winner.Value} {res.Winner.Score:0.00}", "match"));
                 Publish($"{cl.Field}：{res.Value}" + (res.Close ? $"（分不太开：{res.Best:0.00} / {res.Second:0.00}）" : res.Midway ? $"（有点像但没过门槛：最高 {res.Best:0.00}，可能是还没裁模板的新图案）" : ""));
+                string value = res.Close || res.Midway ? await Unsure(cl, f, roi, res, ct) : res.Value;
+                _rec?.Set(cl.Field, value);
                 break;
             }
             case RecordRowBlock rr:
@@ -674,6 +702,74 @@ public sealed class ProgramRunner : IDisposable
     {
         _status = status;
         _c.Overlay?.SetScene(new OverlayScene(_boxes.Values.ToList(), _status));
+    }
+
+    /// <summary>等用户确认花掉的时间（毫秒）。「重复直到…」的超时不算这段，不然确认完一回来循环就超时跳出了。</summary>
+    private long _heldMs;
+
+    /// <summary>
+    /// 认图案分不开（2026-11-25）：问用户（编辑器弹确认框，运行停在这里，按键都松开，靶子停在这一页）。
+    /// 没人问（vbrun、设置成「直接记录」）或等太久没人答，就写 <see cref="UnsureValue"/> 接着跑，这一行不会被去重并掉，回头在表里找得到。
+    /// 用户填了新名字、勾了存成模板：编辑器已经把模板加进程序和这块认图案，这里载进来，以后同样的角标自动认。
+    /// </summary>
+    private async Task<string> Unsure(ClassifyBlock cl, NormFrame f, RegionDef roi, PatternClassifier.Result res, CancellationToken ct)
+    {
+        Unsures++;
+        string fallback = UnsureValue(res);
+        if (_c.AskUnsure == null)
+        {
+            _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "auto", value = fallback, t = BotLog.Now });
+            return fallback;
+        }
+        _c.Input.ReleaseAll();
+        var rpx = f.ToPixels(roi);
+        byte[] regionPng;
+        using (var rc = new Mat(f.Bgr, rpx)) Cv2.ImEncode(".png", rc, out regionPng);
+        byte[]? badgePng = null;
+        (int, int, int, int)? inRegion = null;
+        var top = res.All.Where(c => c.Box != null).OrderByDescending(c => c.Score).FirstOrDefault();
+        if (top?.Box is { } b)
+        {
+            var bpx = f.ToPixels(b);
+            using var sub = new Mat(f.Bgr, bpx);
+            // 和裁模板一样：窗口比基准小时放大到基准尺寸再存
+            using var save = f.K < 0.999 ? sub.Resize(new Size(b.W, b.H), 0, 0, InterpolationFlags.Cubic) : sub.Clone();
+            Cv2.ImEncode(".png", save, out byte[] png);
+            badgePng = png;
+            inRegion = (bpx.X - rpx.X, bpx.Y - rpx.Y, bpx.Width, bpx.Height);
+        }
+        var cands = res.All.OrderByDescending(c => c.Score).Select(c => (c.Template, c.Value, c.Score)).ToList();
+        var req = new UnsureRequest(cl, cands, res.Close, fallback, _rec?.Current ?? new Dictionary<string, string>(), regionPng, badgePng, inRegion);
+        _c.Log.Write(new { ev = "unsureAsk", field = cl.Field, close = res.Close, guess = fallback, best = Math.Round(res.Best, 3), second = Math.Round(res.Second, 3), t = BotLog.Now });
+        Publish($"「{cl.Field}」分不太开：在视搭里确认后继续（运行已暂停，按键都已松开）");
+        var sw = Stopwatch.StartNew();
+        UnsureAnswer? ans;
+        try { ans = await _c.AskUnsure(req, ct); }
+        finally { _heldMs += sw.ElapsedMilliseconds; }
+        long ms = sw.ElapsedMilliseconds;
+        if (ans == null)
+        {
+            _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "timeout", value = fallback, ms, t = BotLog.Now });
+            Publish($"{cl.Field}：{fallback}（没人确认，先这样记，接着跑）");
+            return fallback;
+        }
+        if (ans.Stop)
+        {
+            _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "stop", ms, t = BotLog.Now });
+            throw new UserStopSignal();
+        }
+        UnsureAnswered++;
+        string v = string.IsNullOrWhiteSpace(ans.Value) ? fallback : ans.Value.Trim();
+        if (ans.NewTemplate is { } nt && _c.Program.Templates.TryGetValue(nt, out var def))
+        {
+            if (_templates.Remove(nt, out var old)) old.Dispose();
+            _templates[nt] = TemplateMatcher.Load(Path.Combine(_c.ProgramDir, def.File));
+            if (!cl.Templates.Contains(nt)) cl.Templates.Add(nt);
+        }
+        string how = ans.NewTemplate != null ? "saved" : v == cl.NoneText || cands.Any(c => c.Value == v) ? "picked" : "typed";
+        _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how, value = v, template = ans.NewTemplate, ms, t = BotLog.Now });
+        Publish($"{cl.Field}：{v}（你确认的）");
+        return v;
     }
 
     public void Dispose()

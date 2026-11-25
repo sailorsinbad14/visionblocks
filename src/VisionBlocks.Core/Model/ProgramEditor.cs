@@ -228,6 +228,23 @@ public sealed class ProgramEditor
         return (name, warn);
     }
 
+    /// <summary>
+    /// 认图案分不开时，确认框里填了新名字、勾了「存成新模板」（2026-11-25）：把运行时截下的角标（PNG，已经是基准尺寸）存成模板，
+    /// 名字 = 标签 = 用户填的值（重名加数字），并勾进这块认图案，以后同样的角标自动认出来。返回模板名。
+    /// </summary>
+    public string AddTemplateFromPng(string name, byte[] png, ClassifyBlock? addTo)
+    {
+        string label = name;
+        name = Unique(name, Program.Templates.Keys);
+        string rel = Path.Combine("templates", SafeFile(name) + ".png");
+        Directory.CreateDirectory(Path.Combine(Dir, "templates"));
+        File.WriteAllBytes(Path.Combine(Dir, rel), png);
+        Program.Templates[name] = new TemplateDef { Label = label, File = rel.Replace('\\', '/') };
+        if (addTo != null && !addTo.Templates.Contains(name)) addTo.Templates.Add(name);
+        Commit();
+        return name;
+    }
+
     /// <summary>网格：在画布上拖出第一格，行列数和间距之后在属性面板里改。</summary>
     public string AddGrid(string name, RegionDef firstCell, int cols = 4, int rows = 3, int gapX = 10, int gapY = 10)
     {

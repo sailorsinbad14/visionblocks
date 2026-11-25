@@ -51,6 +51,7 @@ public static class Program
                 "selftest-gridshift" => GridShiftSelfTest.Run(),
                 "selftest-activity" => ActivitySelfTest.Run(),
                 "selftest-multicond" => MultiCondSelfTest.Run(positional),
+                "selftest-unsure" => UnsureSelfTest.Run(positional),
                 "run" => RunProgram(positional.FirstOrDefault() ?? throw new ArgumentException("缺少程序文件路径"), opts),
                 _ => throw new ArgumentException("未知子命令 " + args[0])
             };

@@ -34,6 +34,12 @@ public static class ActivitySelfTest
         Check("{\"ev\":\"classify\",\"field\":\"有效期\",\"value\":\"3天\",\"best\":1,\"second\":0.863,\"close\":false,\"byColor\":false,\"midway\":false,\"scores\":[{\"tpl\":\"1天\",\"score\":0.863,\"color\":4},{\"tpl\":\"3天\",\"score\":1,\"color\":0}],\"t\":1}",
             "sense", "认图案", "有效期：3天（3天 1.00 · 1天 0.86）");
         Check("{\"ev\":\"classify\",\"field\":\"有效期\",\"value\":\"1天\",\"close\":true,\"scores\":[{\"tpl\":\"1天\",\"score\":0.894},{\"tpl\":\"3天\",\"score\":0.882}],\"t\":1}", "warn", "认图案", "分不太开");
+        Check("{\"ev\":\"unsureAsk\",\"field\":\"有效期\",\"close\":true,\"guess\":\"1天?\",\"t\":1}", "warn", "认图案", "停下来等你确认");
+        Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"saved\",\"value\":\"7天\",\"template\":\"7天\",\"ms\":5200,\"t\":1}", "sense", "认图案", "存成了新模板「7天」");
+        Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"picked\",\"value\":\"3天\",\"ms\":900,\"t\":1}", "sense", "认图案", "你确认了：有效期 = 3天");
+        Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"timeout\",\"value\":\"1天?\",\"ms\":120000,\"t\":1}", "warn", "认图案", "等了 2 分钟没人确认，先记成「1天?」");
+        Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"auto\",\"value\":\"未认出\",\"t\":1}", "warn", "认图案", "先记成「未认出」接着跑");
+        Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"stop\",\"ms\":800,\"t\":1}", "bad", "认图案", "停止了运行");
         Check("{\"ev\":\"row\",\"key\":\"碧落战斧|3天\",\"rows\":12,\"t\":1}", "act", "记录一行", "记下第 12 行");
         Check("{\"ev\":\"dup\",\"key\":\"名称、有效期都和第 7 行一样（碧落战斧 · 1天）\",\"rows\":12,\"t\":1}", "act", "记录一行", "都和第 7 行一样");
         Check("{\"ev\":\"pass\",\"pass\":2,\"added\":4,\"atEnd\":false,\"t\":1}", "flow", "重复直到没有新记录", "第 2 遍做完，新记下 4 行");

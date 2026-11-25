@@ -27,6 +27,9 @@ internal sealed class AppSettings
     public bool StickyScope { get; set; } = true;
     /// <summary>右栏活动占属性 + 活动的比例（拖过中间那条缝以后记下，2026-11-25）；0 = 没拖过，按窗口宽度给默认高度。</summary>
     public double ActivityRatio { get; set; }
+    /// <summary>认图案分不开时（2026-11-25）：wait 停下来问、一直等 / timeout 问、等 UnsureMinutes 分钟没人答就先记下接着跑 / record 不问、直接记下接着跑。</summary>
+    public string UnsureMode { get; set; } = "wait";
+    public int UnsureMinutes { get; set; } = 2;
     /// <summary>用户改过的快捷键：动作 → 组合键文字（"" = 清空）。没改的用 Keymap 里的默认值（2026-11-23）。</summary>
     public Dictionary<string, string> Shortcuts { get; set; } = new();
 
@@ -49,6 +52,8 @@ internal sealed class AppSettings
         Current.Shortcuts ??= new();
         if (Current.Lang is not ("zh" or "en")) Current.Lang = "zh";
         if (Current.Theme is not ("system" or "light" or "dark")) Current.Theme = "system";
+        if (Current.UnsureMode is not ("wait" or "timeout" or "record")) Current.UnsureMode = "wait";
+        Current.UnsureMinutes = Math.Clamp(Current.UnsureMinutes, 1, 120);
     }
 
     public static void Save()

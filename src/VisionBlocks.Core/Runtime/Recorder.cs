@@ -53,7 +53,11 @@ public sealed class Recorder : IDisposable
         return list;
     }
 
-    public void Set(string field, string value) => _values[field] = value;
+    public void Set(string field, string value) { _values[field] = value; _fresh.Add(field); }
+
+    /// <summary>上一次「记录一行」以后读到的字段（认图案确认框里告诉用户是哪件物品；上一行留下的值、图片字段的文件路径不算）。</summary>
+    public IReadOnlyDictionary<string, string> Current => _fresh.Where(f => !_thumbs.ContainsKey(f) && _values.ContainsKey(f)).ToDictionary(f => f, f => _values[f]);
+    private readonly HashSet<string> _fresh = new();
 
     /// <summary>存图时一并记下缩略图（16×16 彩色，BGR 字节），去重字段读空时用来认物品。</summary>
     public void SetImage(string field, string value, byte[] thumb) { _values[field] = value; _thumbs[field] = thumb; _pendingImages.Add(value); }
@@ -71,6 +75,7 @@ public sealed class Recorder : IDisposable
     /// </summary>
     public bool Record(IReadOnlyList<string> dedupeBy, out string key)
     {
+        _fresh.Clear();   // 这一行到此为止，后面读到的算下一件
         string V(string f) => _values.GetValueOrDefault(f, "");
         key = string.Join("|", dedupeBy.Select(V));
         var blanks = dedupeBy.Where(f => string.IsNullOrWhiteSpace(V(f))).ToList();

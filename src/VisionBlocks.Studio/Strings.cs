@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 
 namespace VisionBlocks.Studio;
 
@@ -77,6 +77,28 @@ internal static class L
         ["scSaved"] = ("已保存：{0} = {1}", "Saved: {0} = {1}"),
         ["stickyScope"] = ("滚动时钉住外层作用域", "Pin outer scopes while scrolling"),
         ["stickyScopeNote"] = ("程序树往下滚时，把已经滚出去的「重复 / 如果」顶块钉在上面，点一下就跳回去；超过 5 层时，更外面的缩成一行路径，点哪一段跳到哪一层。默认开。", "When the program tree scrolls, the Repeat / If blocks that scrolled out stay pinned at the top; click one to jump back. Beyond 5 levels the outer ones shrink into a one-line path, and clicking a part jumps to that level. On by default."),
+        ["unsureMode"] = ("认图案分不开时", "When a pattern is unclear"),
+        ["unsureModeNote"] = ("「认图案」两张模板分数太近，或者有点像但没过门槛（多半是还没裁模板的新角标）时怎么办。问你时运行停下、按键都松开，靶子停在那一页。「先记下」写的是「1天?」（第一名后面加问号）或「未认出」，不会和认出来的值撞，这一行不会被去重并掉，回头在表里好找。运行中改了从下次运行起生效。",
+            "What to do when two Classify templates score too close, or one looks similar but misses the threshold (usually a new badge with no template yet). While asking, the run pauses, all keys are released and the target stays on that page. \"Record for now\" writes \"1天?\" (the best guess plus a question mark) or \"未认出\" (not recognized); these never collide with recognized values, so the row is not merged by dedupe and is easy to find later. Changes made during a run apply from the next run."),
+        ["unsureWait"] = ("停下来问我，一直等我确认", "Pause and ask me; wait until I answer"),
+        ["unsureTimeoutA"] = ("停下来问我，等", "Pause and ask me; wait"),
+        ["unsureTimeoutB"] = ("分钟没人确认就先记下，接着跑", "minutes, then record it for now and go on"),
+        ["unsureRecord"] = ("不问，直接记下接着跑（没人看着时用）", "Don't ask; record it and keep going (for unattended runs)"),
+        ["sd_unsure"] = ("认图案分不开，等你确认", "Pattern unclear: waiting for you"),
+        ["unsureTitle"] = ("认图案分不开：请确认", "Pattern unclear: please confirm"),
+        ["unsureHead"] = ("「{0}」这次分不开", "\"{0}\" is unclear this time"),
+        ["unsureBody"] = ("运行已暂停，按键都已松开，靶子停在这一页，可以切过去看一眼。红框是最像的那一块。", "The run is paused, all keys are released and the target stays on this page; feel free to look. The red box is the closest match."),
+        ["unsureItem"] = ("这件物品：{0}", "This item: {0}"),
+        ["unsureIsIt"] = ("它是：（点一下就接着跑）", "It is: (click to continue)"),
+        ["unsureNewLabel"] = ("都不是，叫它：", "None of these. Call it:"),
+        ["unsureSaveTpl"] = ("把红框里的图存成新模板，以后自动认", "Save the boxed image as a new template and recognize it automatically"),
+        ["unsureNoBadge"] = ("没找到最像的那一块，存不了模板", "No closest match was found, so it can't be saved as a template"),
+        ["unsureOk"] = ("用这个名字，继续", "Use this name and continue"),
+        ["unsureSkip"] = ("先记成「{0}」，接着跑", "Record \"{0}\" for now and continue"),
+        ["unsureStop"] = ("停止运行", "Stop the run"),
+        ["unsureCountdown"] = ("{0} 后没人确认，就先记成「{1}」接着跑", "If nobody answers within {0}, \"{1}\" is recorded and the run continues"),
+        ["unsureForever"] = ("会一直等你确认（设置里可以改成等几分钟，或者不问）", "Waits until you answer (Settings can change this to a few minutes, or to not asking)"),
+        ["unsureFgFail"] = ("⚠ 没能把靶子切回前台，请点一下靶子窗口；在此之前输入都会被守卫拦下", "⚠ Couldn't bring the target back to the front. Click the target window; until then the guard blocks all input"),
         ["grpFlow"] = ("流程", "Flow"), ["grpSense"] = ("识别（生成「如果…」）", "Detect (makes an \"If…\")"), ["grpRecord"] = ("读取与记录", "Read & record"), ["grpAct"] = ("动作", "Actions"),
         ["palHint"] = ("点一下：加到选中积木的后面（选中「重复/如果」时加到里面）。也可以拖到右边的程序里。", "Click: insert after the selected block (inside it if it's a Repeat/If). Or drag it into the program."),
         ["props"] = ("属性", "Properties"), ["activity"] = ("活动", "Activity"),

@@ -281,8 +281,15 @@ internal static class SelfTest
             : Process.GetProcessesByName(pname).FirstOrDefault(x => x.MainWindowHandle != IntPtr.Zero && x.MainWindowTitle != "BenchTarget")   // 靶子也用编辑器的 exe 启动，跳过它
               ?? throw new InvalidOperationException($"没有找到进程 {pname} 的窗口");
         if (p.MainWindowHandle == IntPtr.Zero) throw new InvalidOperationException($"进程 {p.Id} 没有主窗口");
+        // --hwnd：截这个进程的另一个窗口（2026-11-25：认图案确认框不是主窗口），必须属于 --pid 那个进程
+        IntPtr h = p.MainWindowHandle;
+        if (o.TryGetValue("hwnd", out var hs))
+        {
+            h = new IntPtr(long.Parse(hs, System.Globalization.CultureInfo.InvariantCulture));
+            if (WindowInfo.ProcessIdOf(h) != (uint)p.Id) throw new InvalidOperationException($"窗口 {hs} 不是进程 {p.Id} 的");
+        }
         using var wgc = new WgcFrameSource();
-        wgc.Start(p.MainWindowHandle);
+        wgc.Start(h);
         var sw = Stopwatch.StartNew();
         Frame? fr = null;
         while (fr == null && sw.ElapsedMilliseconds < 3000) { fr = wgc.TryGetLatest(); Thread.Sleep(30); }

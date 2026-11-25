@@ -8,7 +8,9 @@
 识别准确率（名称、库存、分类）只如实报告，不预设门槛。
 2026-11-25：靶子加了 --twins（同名物品只差图片角标），物品改按「分类 + 第几件」认，不再按名字。
 结果表里有「有效期」列时，对角标：1天 / 3天 → 同名；红底、蓝底「限时」→「限时红」「限时蓝」；没角标 →「无」。
-「7天」故意不裁模板（测「没见过的角标」），不算进硬指标，单独报告它被记成了什么。
+「7天」故意不裁模板（测「没见过的角标」）。2026-11-25 起认图案分不开时不会再被并掉：
+没人确认写「1天?」（第一名加问号）或「未认出」，在编辑器里确认了写确认的值（比如「7天」）。所以「7天」也算进「恰好记一次」，
+有效期只要求不和认出来的值撞（带问号、「未认出」或「7天」），单独报告。
 """
 import csv
 import json
@@ -79,7 +81,7 @@ def main(run: Path) -> int:
     paired = len(opens) == len(marks)
     src = [by_key[(o["cat"], o["idx"])] for o, m in zip(opens, marks) if m == "row"] if paired else []
     src_keys = [key(it) for it in src]
-    missing = [it for it in items if key(it) not in src_keys and it not in untemplated] if paired else []
+    missing = [it for it in items if key(it) not in src_keys] if paired else []
     twice = sorted({k for k in src_keys if src_keys.count(k) > 1})
 
     name_ok = sum(1 for r, it in zip(rows, src) if r.get("名称") == it["name"])
@@ -91,7 +93,7 @@ def main(run: Path) -> int:
     print(f"靶子物品 {len(items)} 个{'（含同名物品）' if truth.get('twins') else ''}；结果表 {len(rows)} 行；打开详情 {len(opens)} 次，工具记录/跳过 {len(marks)} 次（{'能逐次配对' if paired else '对不上，无法配对'}）")
     once = paired and not missing and not twice and len(rows) == len(src)
     print(f"[硬指标] 每个物品恰好记一次：{'通过' if once else '不通过'}（漏记 {len(missing)}，同一物品记了两次 {len(twice)}"
-          + (f"；「7天」{len(untemplated)} 件不算，见下面" if untemplated else "") + "）")
+          + (f"；含没裁模板的「7天」{len(untemplated)} 件" if untemplated else "") + "）")
     # 卡键看工具自己的日志：靶子那边的「按下没收到松开」也可能是用户自己按的键（比如急停热键的 Ctrl、Alt），
     # 或者工具发了松开、但那一刻前台已经换成别的窗口（2026-11-22 实测两种都出现过），都不是工具卡键
     pressed, left = bot_keys(bot) if bot else (set(), None)
@@ -133,10 +135,12 @@ def main(run: Path) -> int:
         for r, it in checked:
             if r.get("有效期") != want_badge(it):
                 print(f"  角标认错：{it['cat']}#{it['idx']} {it['name']} 应为「{want_badge(it)}」，认成「{r.get('有效期')}」")
-    for it in untemplated:
-        got = [r.get("有效期", "?") for r, s in zip(rows, src) if key(s) == key(it)]
-        print(f"[参考] 没裁模板的「7天」{it['cat']}#{it['idx']} {it['name']}："
-              + (f"记成一行，有效期「{got[0]}」" if got else "没单独记一行（被当成重复了），看 bot.jsonl 里的提醒"))
+    if untemplated and rows and "有效期" in rows[0]:
+        apart = lambda v: v == "7天" or v.endswith("?") or v == "未认出"   # 不和认出来的「1天」「3天」「无」撞
+        got = {key(it): [r.get("有效期", "") for r, s in zip(rows, src) if key(s) == key(it)] for it in untemplated}
+        ok = sum(1 for it in untemplated if got[key(it)] and apart(got[key(it)][0]))
+        print(f"[识别] 没裁模板的「7天」单独记一行、值不和认出来的撞 {ok}/{len(untemplated)}：" + "、".join(
+            f"{it['cat']}#{it['idx']}「{got[key(it)][0]}」" if got[key(it)] else f"{it['cat']}#{it['idx']}（没单独记）" for it in untemplated))
     for it in missing:
         print(f"  漏记：{it['cat']}#{it['idx']} {it['name']}{'（角标 ' + it['badge'] + '）' if it.get('badge') else ''}")
     hard_ok = once and stray == 0 and not left

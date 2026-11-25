@@ -141,6 +141,138 @@ internal static class Ui
         return w;
     }
 
+    /// <summary>
+    /// 认图案分不开时的确认框（2026-11-25）：热区截图（红框 = 最像的那一块）、这件物品已经读到的字段、
+    /// 候选值按钮（点一下就接着跑）、「都不是，叫它：」+「存成新模板」、「先记成「1天?」接着跑」、「停止运行」。
+    /// 不是模态框：主窗口的「■ 停止」、急停热键照样能用。answer 只调一次；关掉这个框 = 先记下接着跑；timeoutMinutes 为 0 = 一直等。
+    /// saveTemplate(名字) 把红框里的图存成模板，返回模板名。
+    /// </summary>
+    public static Window UnsureDialog(Window owner, UnsureRequest q, string fallback, int timeoutMinutes, Action<UnsureAnswer?> answer, Func<string, string> saveTemplate)
+    {
+        var w = Dialog(owner, L.T("unsureTitle"));
+        w.Topmost = true;
+        AutomationProperties.SetAutomationId(w, "unsureDialog");
+        bool done = false;
+        System.Windows.Threading.DispatcherTimer? timer = null;
+        void Done(UnsureAnswer? a) { if (done) return; done = true; timer?.Stop(); answer(a); w.Close(); }
+        w.Closed += (_, _) => { timer?.Stop(); if (!done) { done = true; answer(null); } };
+
+        var sp = new StackPanel { Margin = new Thickness(22, 18, 22, 18), Width = 460 };
+        sp.Children.Add(new TextBlock { Text = string.Format(L.T("unsureHead"), q.Block.Field), FontSize = 18, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Theme["DisplayFont"], Margin = new Thickness(0, 0, 0, 4) });
+        var best = q.Candidates.GroupBy(c => c.Value).Select(g => g.First()).ToList();   // 同一个值只留分最高的那张
+        sp.Children.Add(Label(string.Join(" · ", best.Take(3).Select(c => $"{c.Value} {c.Score:0.00}")), 12, (Brush)Theme["Text2"]));
+        sp.Children.Add(Label(L.T("unsureBody"), 12, (Brush)Theme["Text2"]));
+        var item = q.Row.Where(kv => kv.Key != q.Block.Field && kv.Value.Length > 0).Select(kv => $"{kv.Key} = {kv.Value}").ToList();
+        if (item.Count > 0) sp.Children.Add(Label(string.Format(L.T("unsureItem"), string.Join("，", item)), 13));
+
+        // 热区截图放大到约 300 宽，红框标出最像的那一块
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.StreamSource = new MemoryStream(q.RegionPng);
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.EndInit();
+            double z = Math.Clamp(300.0 / Math.Max(1, bmp.PixelWidth), 1, 6);
+            var cv = new Canvas { Width = bmp.PixelWidth * z, Height = bmp.PixelHeight * z, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 8) };
+            var img = new Image { Source = bmp, Width = cv.Width, Height = cv.Height, Stretch = Stretch.Fill };
+            RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.NearestNeighbor);
+            AutomationProperties.SetAutomationId(img, "unsureImage");
+            cv.Children.Add(img);
+            if (q.BadgeInRegion is { } b)
+            {
+                var r = new System.Windows.Shapes.Rectangle { Width = b.W * z, Height = b.H * z, Stroke = Bad, StrokeThickness = 2 };
+                Canvas.SetLeft(r, b.X * z); Canvas.SetTop(r, b.Y * z);
+                cv.Children.Add(r);
+            }
+            sp.Children.Add(new Border { Child = cv, BorderBrush = Line, BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 6) });
+        }
+        catch (Exception e) { sp.Children.Add(Label("（截图显示不出来：" + e.Message + "）", 12, Bad)); }
+
+        // 候选值：点一下就用这个值接着跑
+        sp.Children.Add(Label(L.T("unsureIsIt"), 13, null, FontWeights.SemiBold));
+        var cands = new WrapPanel { Margin = new Thickness(0, 4, 0, 8) };
+        int i = 0;
+        foreach (var (value, score) in best.Select(c => (c.Value, (double?)c.Score)).Append((q.Block.NoneText, (double?)null)).DistinctBy(x => x.Item1))
+        {
+            var btn = new Button { Content = score is { } s ? $"{value}  {s:0.00}" : value, Margin = new Thickness(0, 0, 8, 6), Padding = new Thickness(12, 4, 12, 4) };
+            AutomationProperties.SetAutomationId(btn, $"unsureCand{i++}");
+            AutomationProperties.SetName(btn, value);
+            string v = value;
+            btn.Click += (_, _) => Done(new UnsureAnswer(v));
+            cands.Children.Add(btn);
+        }
+        sp.Children.Add(cands);
+
+        // 都不是：填新名字，默认存成模板
+        sp.Children.Add(Label(L.T("unsureNewLabel"), 13, null, FontWeights.SemiBold));
+        var nameRow = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
+        var ok = new Button { Content = L.T("unsureOk"), IsEnabled = false, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 4, 12, 4), Style = (Style)Theme["InkButton"] };
+        AutomationProperties.SetAutomationId(ok, "unsureOk");
+        DockPanel.SetDock(ok, Dock.Right);
+        var tb = new TextBox { VerticalContentAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetAutomationId(tb, "unsureNew");
+        AutomationProperties.SetName(tb, L.T("unsureNewLabel"));
+        nameRow.Children.Add(ok);
+        nameRow.Children.Add(tb);
+        sp.Children.Add(nameRow);
+        var save = new CheckBox { Content = L.T("unsureSaveTpl"), IsChecked = q.BadgePng != null, IsEnabled = q.BadgePng != null, Margin = new Thickness(0, 2, 0, 2) };
+        AutomationProperties.SetAutomationId(save, "unsureSave");
+        sp.Children.Add(save);
+        if (q.BadgePng == null) sp.Children.Add(Label(L.T("unsureNoBadge"), 12, (Brush)Theme["Text3"]));
+        tb.TextChanged += (_, _) => ok.IsEnabled = tb.Text.Trim().Length > 0;
+        void UseName()
+        {
+            string name = tb.Text.Trim();
+            if (name.Length == 0) return;
+            // 填的正好是已有的值：当成选了它，不再存一张同名模板（两张同值模板会互相「分不开」）
+            bool known = name == q.Block.NoneText || q.Candidates.Any(c => c.Value == name);
+            string? tpl = null;
+            if (!known && save.IsChecked == true && q.BadgePng != null)
+            {
+                try { tpl = saveTemplate(name); }
+                catch (Exception e) { MessageBox.Show(w, "模板没存成：" + e.Message, L.T("unsureTitle")); }
+            }
+            Done(new UnsureAnswer(name, tpl));
+        }
+        ok.Click += (_, _) => UseName();
+        tb.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; UseName(); } };
+
+        // 底部：倒计时 / 一直等的说明，先记下，停止
+        var countdown = Label(timeoutMinutes > 0 ? "" : L.T("unsureForever"), 12, (Brush)Theme["Text2"]);
+        AutomationProperties.SetAutomationId(countdown, "unsureCountdown");
+        countdown.Margin = new Thickness(0, 10, 0, 6);
+        sp.Children.Add(countdown);
+        var bottom = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var skip = new Button { Content = string.Format(L.T("unsureSkip"), fallback), Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(12, 4, 12, 4) };
+        AutomationProperties.SetAutomationId(skip, "unsureSkip");
+        skip.Click += (_, _) => Done(null);
+        var stop = new Button { Content = L.T("unsureStop"), Padding = new Thickness(12, 4, 12, 4), Foreground = Bad };
+        AutomationProperties.SetAutomationId(stop, "unsureStop");
+        stop.Click += (_, _) => Done(new UnsureAnswer(null, Stop: true));
+        bottom.Children.Add(skip);
+        bottom.Children.Add(stop);
+        sp.Children.Add(bottom);
+        w.Content = sp;
+
+        if (timeoutMinutes > 0)
+        {
+            var until = DateTime.Now.AddMinutes(timeoutMinutes);
+            void Tick()
+            {
+                var left = until - DateTime.Now;
+                if (left <= TimeSpan.Zero) { Done(null); return; }
+                countdown.Text = string.Format(L.T("unsureCountdown"), left.ToString(left.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss"), fallback);
+            }
+            timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            timer.Tick += (_, _) => Tick();
+            Tick();
+            timer.Start();
+        }
+        w.Loaded += (_, _) => { tb.Focus(); try { System.Media.SystemSounds.Exclamation.Play(); } catch { } };
+        return w;
+    }
+
     public static string? Ask(Window owner, string title, string prompt, string def)
     {
         var w = Dialog(owner, title);
@@ -243,6 +375,41 @@ internal static class Ui
         sticky.Checked += (_, _) => { s.StickyScope = true; AppSettings.Save(); changed(); };
         sticky.Unchecked += (_, _) => { s.StickyScope = false; AppSettings.Save(); changed(); };
         sp.Children.Add(sticky);
+
+        // 认图案分不开时（2026-11-25）：问不问、等多久。运行开始时读，运行中改了下次运行生效
+        Head("search", L.T("unsureMode"));
+        sp.Children.Add(Label(L.T("unsureModeNote"), 12, (Brush)Theme["Text2"]));
+        var um = new StackPanel { Margin = new Thickness(0, 8, 0, 14) };
+        AutomationProperties.SetAutomationId(um, "unsureMode");
+        AutomationProperties.SetName(um, L.T("unsureMode"));
+        RadioButton UR(string value, string text, string aid)
+        {
+            var r = new RadioButton { Content = text, GroupName = "vb-unsureMode", IsChecked = s.UnsureMode == value, VerticalContentAlignment = VerticalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetAutomationId(r, aid);
+            r.Checked += (_, _) => { s.UnsureMode = value; AppSettings.Save(); };
+            return r;
+        }
+        var urWait = UR("wait", L.T("unsureWait"), "unsureWait");
+        urWait.Margin = new Thickness(0, 0, 0, 6);
+        um.Children.Add(urWait);
+        var urTimeout = UR("timeout", L.T("unsureTimeoutA"), "unsureTimeout");
+        var mins = new TextBox { Text = s.UnsureMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture), Width = 40, Margin = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, HorizontalContentAlignment = HorizontalAlignment.Center };
+        AutomationProperties.SetAutomationId(mins, "unsureMinutes");
+        AutomationProperties.SetName(mins, L.T("unsureTimeoutB"));
+        mins.TextChanged += (_, _) =>
+        {
+            if (!int.TryParse(mins.Text, out int m) || m < 1 || m > 120) return;   // 只认 1–120 分钟，别的不存
+            s.UnsureMinutes = m;
+            urTimeout.IsChecked = true;
+            AppSettings.Save();
+        };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        row.Children.Add(urTimeout);
+        row.Children.Add(mins);
+        row.Children.Add(new TextBlock { Text = L.T("unsureTimeoutB"), VerticalAlignment = VerticalAlignment.Center });
+        um.Children.Add(row);
+        um.Children.Add(UR("record", L.T("unsureRecord"), "unsureRecord"));
+        sp.Children.Add(um);
 
         // 鼠标操作随机化：打开前用和「加入白名单」同样的系统确认框
         Head("select", L.T("humanize"));

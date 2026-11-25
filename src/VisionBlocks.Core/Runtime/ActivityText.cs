@@ -29,7 +29,7 @@ public static class ActivityText
         "runStart", "keydown", "clickConfirm", "wait", "blocked", "imeOff", "waitTimeout", "loopTimeout",
         "paused", "resumed", "emergencyStop", "noFrame", "frameBack", "sendFailed",
         "row", "dup", "pass", "loopCap", "loopAtEnd", "read", "reread", "classify", "dragPx", "wheelPx",
-        "gridShift", "gridShiftSkipped"
+        "gridShift", "gridShiftSkipped", "unsureAsk", "unsureAnswer"
     };
 
     /// <summary>bot.jsonl 的一行 → 活动里的一条；不显示的返回 null。</summary>
@@ -82,6 +82,15 @@ public static class ActivityText
                     : new("act", "网格", $"「{S(e, "grid")}」下移 {D(e, "phase"):0} px 对齐", $"少走了 {D(e, "shortfall"):0} px，行距 {N(e, "pitch")}"),
                 "gridShiftSkipped" => new("warn", "网格", $"「{S(e, "grid")}」没挪：量不出走了多少", "下一遍格子可能对不齐"),
                 "cond" when S(e, "kind") == "text" => new("sense", "文字包含", $"读到「{S(e, "norm")}」", B(e, "hit") ? "成立" : "不成立"),
+                "unsureAsk" => new("warn", "认图案", $"「{S(e, "field")}」分不开，停下来等你确认", "按键都已松开，靶子停在这一页"),
+                "unsureAnswer" => S(e, "how") switch
+                {
+                    "auto" => new("warn", "认图案", $"「{S(e, "field")}」分不开，先记成「{S(e, "value")}」接着跑", "这一行不会被去重并掉，回头在表里找它"),
+                    "timeout" => new("warn", "认图案", $"等了 {Mins(D(e, "ms"))}没人确认，先记成「{S(e, "value")}」接着跑", "这一行不会被去重并掉，回头在表里找它"),
+                    "stop" => new("bad", "认图案", "你在确认框里停止了运行"),
+                    "saved" => new("sense", "认图案", $"你确认了：{S(e, "field")} = {S(e, "value")}", $"存成了新模板「{S(e, "template")}」，以后自动认"),
+                    _ => new("sense", "认图案", $"你确认了：{S(e, "field")} = {S(e, "value")}")
+                },
                 _ => null
             };
         }
@@ -114,6 +123,7 @@ public static class ActivityText
     }
 
     private static string Shown(string v) => v.Length > 0 ? v : "（读空）";
+    private static string Mins(double ms) => ms >= 60000 ? $"{ms / 60000:0.#} 分钟" : $"{ms / 1000:0} 秒";
     private static string? Note(string key) => key.StartsWith('（') ? key.Trim('（', '）') : null;
 
     private static string S(JsonElement e, string p) => e.TryGetProperty(p, out var v) ? v.ValueKind switch

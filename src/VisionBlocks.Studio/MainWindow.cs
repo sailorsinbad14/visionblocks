@@ -782,7 +782,8 @@ public sealed partial class MainWindow : Window
         bool inFront = fg == _run.Target || WindowInfo.RootOwner(fg) == _run.Target;
         _notInFrontTicks = inFront ? 0 : _notInFrontTicks + 1;
         int blocked = _run.BlockedEvents;
-        if (_run.Paused) ApplyRunUi(RunUi.Paused, blocked: blocked);
+        if (_unsure != null) ApplyRunUi(RunUi.Paused, L.T("sd_unsure"), blocked);   // 认图案确认框开着：运行停着等你
+        else if (_run.Paused) ApplyRunUi(RunUi.Paused, blocked: blocked);
         else if (_notInFrontTicks >= 2) ApplyRunUi(RunUi.Blocked, blocked: blocked);
         else ApplyRunUi(RunUi.Running, blocked: blocked);
     }
@@ -1908,7 +1909,8 @@ public sealed partial class MainWindow : Window
             bool inventory = _scene.SelectedIndex == 1;
             string args = $"--monitor-device \"{scr.Device}\" --log \"{Path.Combine(_sessionDir, "target")}\" --duration 1800"
                 + (tw != 1920 ? $" --size {tw}x{th}" : "")
-                + (inventory ? " --scene inventory" : " --start-delay 15");
+                + (inventory ? " --scene inventory" : " --start-delay 15")
+                + (Environment.GetEnvironmentVariable("VB_TARGET_ARGS") is { Length: > 0 } extra ? " " + extra : "");   // 测试用：给练习靶子加参数（如 --twins --natural-end）
             if (tw != 1920) Log($"所选屏幕放不下 1920×1080 的靶子，改用 {tw}×{th}。这个尺寸下文字识别会比 1920 宽差一些（11-20 实测 1600×900 时名称、分类读错更多）");
             Log("启动靶子：" + args);
             var (p, h) = await BenchLauncher.LaunchAsync(args);
@@ -2099,7 +2101,13 @@ public sealed partial class MainWindow : Window
         _poll.Start();
         Log($"▶ 开始运行。接下来请不要碰键鼠；随时可按 {AppSettings.KeyOf(Keymap.EStop)} 急停。");
         var run = _run;
-        string result = await run.RunAsync(_ed, _bound, s => Dispatcher.BeginInvoke(() => Log(s)), _ => { });
+        // 认图案分不开时问不问、等多久：运行开始时读设置（2026-11-25）
+        string unsureMode = AppSettings.Current.UnsureMode;
+        int unsureMins = unsureMode == "timeout" ? AppSettings.Current.UnsureMinutes : 0;
+        var ed = _ed;
+        IntPtr target = _bound;
+        string result = await run.RunAsync(_ed, _bound, s => Dispatcher.BeginInvoke(() => Log(s)), _ => { },
+            unsureMode == "record" ? null : (q, ct) => AskUnsure(ed, target, q, unsureMins, ct));
         _poll.Stop();
         Log(result);
         _lastResults = Directory.Exists(run.DataDir) ? run.DataDir : _sessionDir;
@@ -2121,6 +2129,43 @@ public sealed partial class MainWindow : Window
         _stopBtn.IsEnabled = false;
         if (_closeRequested) { Close(); return; }
         Activate();
+    }
+
+    /// <summary>开着的认图案确认框（运行停着等用户答）。</summary>
+    private Window? _unsure;
+
+    /// <summary>
+    /// 认图案分不开（2026-11-25）：运行器在后台线程上调，这里到界面线程弹确认框，等用户答、倒计时到或运行被停。
+    /// 答完（停止除外）把靶子切回前台再接着跑；存成新模板时刷新资源区。编辑器最小化着时先还原，不然确认框跟着藏起来。
+    /// </summary>
+    private Task<UnsureAnswer?> AskUnsure(ProgramEditor ed, IntPtr target, UnsureRequest q, int minutes, CancellationToken ct)
+    {
+        var tcs = new TaskCompletionSource<UnsureAnswer?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (ct.IsCancellationRequested) { tcs.TrySetCanceled(ct); return; }
+            CancellationTokenRegistration reg = default;
+            Window? w = null;
+            w = Ui.UnsureDialog(this, q, q.Fallback, minutes, a =>
+            {
+                reg.Dispose();
+                _unsure = null;
+                if (a?.Stop != true && !ct.IsCancellationRequested && !WindowInfo.TrySetForeground(target)) Log(L.T("unsureFgFail"));
+                tcs.TrySetResult(a);
+            }, name =>
+            {
+                string tpl = ed.AddTemplateFromPng(name, q.BadgePng!, q.Block);
+                RebuildResources();
+                ShowProps();
+                return tpl;
+            });
+            reg = ct.Register(() => Dispatcher.BeginInvoke(() => { tcs.TrySetCanceled(ct); w.Close(); }));
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            _unsure = w;
+            w.Show();
+            w.Activate();
+        });
+        return tcs.Task;
     }
 
     /// <summary>用资源管理器打开上一次运行的结果文件夹。</summary>

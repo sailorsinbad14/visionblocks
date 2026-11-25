@@ -36,6 +36,46 @@ public sealed class ProgramEditor
     /// <summary>插入、删除、移动、加删资源这类结构性改动：每次单独一步撤销。</summary>
     private void Commit() => Record(coalesce: false);
 
+    /// <summary>
+    /// 只改了显示（程序树折叠 / 展开，2026-11-25）：算改动（关窗时问要不要保存），但不占一步撤销——
+    /// 撤销是撤程序本身的改动，不该一步步撤回折叠。下一步改动的撤销点从折叠以后算。
+    /// </summary>
+    public void ViewChanged()
+    {
+        _baseline = Snapshot();
+        Dirty = true;
+        Changed?.Invoke();
+    }
+
+    /// <summary>b 所在的每一层容器（从外到里）；b 在「否则」分支里时那一层记 IsElse = true。折叠时用来一路展开到选中的积木。</summary>
+    public List<(Block Owner, bool IsElse)> AncestorsOf(Block b)
+    {
+        var path = new List<(Block, bool)>();
+        bool Find(List<Block> list)
+        {
+            foreach (var x in list)
+            {
+                if (ReferenceEquals(x, b)) return true;
+                if (x is IContainerBlock c) { path.Add((x, false)); if (Find(c.Body)) return true; path.RemoveAt(path.Count - 1); }
+                if (x is IfBlock ib) { path.Add((x, true)); if (Find(ib.Else)) return true; path.RemoveAt(path.Count - 1); }
+            }
+            return false;
+        }
+        return Find(Program.Program) ? path : new List<(Block, bool)>();
+    }
+
+    /// <summary>把 b 外面折着的容器都展开，返回有没有改。</summary>
+    public bool Reveal(Block b)
+    {
+        bool changed = false;
+        foreach (var (owner, isElse) in AncestorsOf(b))
+        {
+            if (isElse && owner is IfBlock ib && ib.ElseCollapsed) { ib.ElseCollapsed = false; changed = true; }
+            else if (!isElse && owner.Collapsed) { owner.Collapsed = false; changed = true; }
+        }
+        return changed;
+    }
+
     // ───────────── 撤销 / 重做（2026-11-23）：每次改动前整个程序存一份 JSON，最多 50 步 ─────────────
 
     public const int MaxUndo = 50;

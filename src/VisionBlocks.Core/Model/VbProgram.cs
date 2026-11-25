@@ -149,6 +149,12 @@ public sealed class ColorDef
 public abstract class Block
 {
     public string? Note { get; set; }
+    /// <summary>
+    /// 程序树里这块容器积木折起来了（2026-11-25）：只影响编辑器显示，运行照常执行里面所有积木。
+    /// 展开的不写进文件；0.3.0 及以前的编辑器读到会跳过（全部展开）。
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Collapsed { get; set; }
 }
 
 public interface IContainerBlock { List<Block> Body { get; } }
@@ -174,6 +180,9 @@ public sealed class IfBlock : Block, IContainerBlock
     public Condition Cond { get; set; } = new ImageCondition();
     public List<Block> Body { get; set; } = new();
     public List<Block> Else { get; set; } = new();
+    /// <summary>「否则」分支在程序树里折起来了（只影响显示）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ElseCollapsed { get; set; }
 }
 
 public sealed class WaitUntilBlock : Block

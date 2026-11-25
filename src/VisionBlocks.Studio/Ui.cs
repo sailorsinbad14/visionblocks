@@ -302,6 +302,7 @@ internal static class Ui
         "run" => L.T("btnRun"), "stop" => L.T("btnStop"), "openResults" => L.T("openResults"), "freeze" => L.T("btnFreeze"),
         "copy" => L.T("btnCopy"), "cut" => L.T("btnCut"), "paste" => L.T("btnPaste"), "duplicate" => L.T("btnDuplicate"), "delete" => L.T("btnDelete"),
         "moveUp" => L.T("btnUp"), "moveDown" => L.T("btnDown"), "indent" => L.T("btnIndent"), "outdent" => L.T("btnOutdent"),
+        "fold" => L.T("foldClose"), "unfold" => L.T("foldOpen"), "foldAll" => L.T("foldAll"), "unfoldAll" => L.T("unfoldAll"),
         Keymap.Pause => L.T("hkPause"), Keymap.EStop => L.T("hkStop"),
         _ when id.StartsWith("tool", StringComparison.Ordinal) => L.T(id),
         _ when id.StartsWith("pal:", StringComparison.Ordinal) => L.T("scPalette") + L.Z(L.PaletteName(id[4..])),

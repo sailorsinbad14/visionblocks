@@ -106,6 +106,9 @@ public static class Keymap
         new("copy", "blocks", "Ctrl+C"), new("cut", "blocks", "Ctrl+X"), new("paste", "blocks", "Ctrl+V"), new("duplicate", "blocks", "Ctrl+D"),
         new("delete", "blocks", "Delete"), new("moveUp", "blocks", "Alt+Up"), new("moveDown", "blocks", "Alt+Down"),
         new("indent", "blocks", "Alt+Right"), new("outdent", "blocks", "Alt+Left"),
+        // 程序树折叠（2026-11-25）
+        new("fold", "blocks", "Ctrl+Shift+BracketLeft"), new("unfold", "blocks", "Ctrl+Shift+BracketRight"),
+        new("foldAll", "blocks", "Ctrl+Alt+BracketLeft"), new("unfoldAll", "blocks", "Ctrl+Alt+BracketRight"),
     }.Concat(PaletteTypes.Select(t => new ActionDef("pal:" + t, "palette", null)))
      .Concat(new[] { new ActionDef(Pause, "global", "Ctrl+Alt+F11", true), new ActionDef(EStop, "global", "Ctrl+Alt+F12", true) })
      .ToList();

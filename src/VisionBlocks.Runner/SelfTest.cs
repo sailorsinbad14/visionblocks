@@ -219,7 +219,40 @@ internal static class SelfTest
         var (_, again) = clip.Paste(other);
         Check("再贴一次：资源都在了，只剩同名不同内容的提示", again.All(x => x.Contains("沿用")), string.Join("；", again));
         Check("一次粘贴（带资源 + 插入）一步就能撤销", other.Undo() && other.Program.Program.Count == 0 && !other.Program.Regions.ContainsKey("提示键区"), $"撤销后积木 {other.Program.Program.Count} 块、热区 {other.Program.Regions.Count} 个");
-        try { Directory.Delete(other.Dir, true); Directory.Delete(ed.Dir, true); } catch { }
+
+        // 作用域折叠（2026-11-25）：存进程序文件（展开的不写），只改显示不占撤销，复制带着，选中里面的积木时一路展开
+        Console.WriteLine("折叠：");
+        var fed = ProgramEditor.CreateNew(Path.Combine(dir, "fold"), "折叠");
+        fed.AddRegion("区", new RegionDef { X = 0, Y = 0, W = 100, H = 100 });
+        var fk = K("K"); var fe = K("E");
+        var fin = new IfBlock { Cond = new TextCondition { Region = "区", Contains = "x" }, Body = { fk }, Else = { fe } };
+        var fout = new RepeatBlock { Times = 2, Body = { fin } };
+        fed.Insert(fout, null);
+        string plain = J(fed.Program);
+        Check("展开的不写进文件", !plain.Contains("collapsed") && !plain.Contains("elseCollapsed"), "");
+        fed.Save();
+        fout.Collapsed = true; fin.ElseCollapsed = true; fed.ViewChanged();
+        Check("折叠算改动（关窗会问要不要保存）", fed.Dirty, $"Dirty={fed.Dirty}");
+        // 不占撤销：折叠以后撤一步，撤掉的是折叠之前那次插入，不是折叠
+        bool undid = fed.Undo();
+        Check("折叠不占撤销：撤一步撤的是前一次插入", undid && fed.Program.Program.Count == 0, $"撤一步后剩 {fed.Program.Program.Count} 块");
+        fed.Redo();
+        fout = (RepeatBlock)fed.Program.Program[0]; fin = (IfBlock)fout.Body[0]; fe = (KeyBlock)fin.Else[0];
+        Check("重做回来还是折着的", fout.Collapsed && fin.ElseCollapsed, "");
+        fed.Save();
+        string folded = File.ReadAllText(fed.ProgramPath);
+        Check("折着的写进文件：collapsed / elseCollapsed", folded.Contains("\"collapsed\": true") && folded.Contains("\"elseCollapsed\": true"), "");
+        var back = ProgramEditor.Open(fed.ProgramPath);
+        Check("读回来还是折着的", back.Program.Program[0].Collapsed && ((IfBlock)((RepeatBlock)back.Program.Program[0]).Body[0]).ElseCollapsed, "");
+        var oldJson = System.Text.Json.JsonSerializer.Deserialize<VbProgram>(plain, ProgramIO.Options)!;
+        Check("旧文件（没有这一项）：全部展开", !oldJson.Program[0].Collapsed && !((IfBlock)((RepeatBlock)oldJson.Program[0]).Body[0]).ElseCollapsed, "");
+        var fcopy = (RepeatBlock)ProgramEditor.Clone(fout);
+        Check("复制一份带着折叠", fcopy.Collapsed && ((IfBlock)fcopy.Body[0]).ElseCollapsed, "");
+        var anc = fed.AncestorsOf(fe);
+        Check("否则分支里那块的外层：重复 → 如果（否则）", anc.Count == 2 && ReferenceEquals(anc[0].Owner, fout) && !anc[0].IsElse && ReferenceEquals(anc[1].Owner, fin) && anc[1].IsElse, string.Join(" › ", anc.Select(a => a.Owner.GetType().Name + (a.IsElse ? "（否则）" : ""))));
+        Check("选中里面的积木：一路展开", fed.Reveal(fe) && !fout.Collapsed && !fin.ElseCollapsed && !fed.Reveal(fe), "");
+        Check("运行不受影响：折着的程序照样通过校验", ProgramIO.Validate(back.Program).Count == 0, string.Join("；", ProgramIO.Validate(back.Program)));
+        try { Directory.Delete(other.Dir, true); Directory.Delete(ed.Dir, true); Directory.Delete(fed.Dir, true); } catch { }
         return fails;
     }
 

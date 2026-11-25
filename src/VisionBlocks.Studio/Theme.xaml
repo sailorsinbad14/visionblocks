@@ -324,13 +324,15 @@
                 <ContentPresenter ContentSource="Header" TextElement.Foreground="White" TextElement.FontWeight="SemiBold"/>
               </Border>
             </Border>
-            <Border BorderBrush="{TemplateBinding Background}" BorderThickness="16,0,0,0" Padding="14,8,0,2" MinHeight="18">
+            <Border x:Name="Body" BorderBrush="{TemplateBinding Background}" BorderThickness="16,0,0,0" Padding="14,8,0,2" MinHeight="18">
               <ItemsPresenter/>
             </Border>
-            <Border Background="{TemplateBinding Background}" HorizontalAlignment="Left" Width="150" Height="14" CornerRadius="0,0,9,9"/>
+            <Border x:Name="Cap" Background="{TemplateBinding Background}" HorizontalAlignment="Left" Width="150" Height="14" CornerRadius="0,0,9,9"/>
           </StackPanel>
           <ControlTemplate.Triggers>
             <Trigger Property="IsSelected" Value="True"><Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource Ink}"/></Trigger>
+            <!-- 折起来（2026-11-25）：只剩顶块和一条短底盖，里面的积木不显示（运行照常执行） -->
+            <Trigger Property="IsExpanded" Value="False"><Setter TargetName="Body" Property="Visibility" Value="Collapsed"/><Setter TargetName="Cap" Property="Width" Value="60"/><Setter TargetName="Cap" Property="Height" Value="10"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
@@ -347,12 +349,13 @@
                 <ContentPresenter ContentSource="Header" TextElement.Foreground="White" TextElement.FontStyle="Italic"/>
               </Border>
             </Border>
-            <Border BorderBrush="{TemplateBinding Background}" BorderThickness="16,0,0,0" Padding="14,6,0,0" MinHeight="12">
-              <ItemsPresenter/>
+            <Border x:Name="Body" BorderBrush="{TemplateBinding Background}" BorderThickness="16,0,0,0" Padding="14,6,0,0" MinHeight="12">
+              <ItemsPresenter x:Name="Items"/>
             </Border>
           </StackPanel>
           <ControlTemplate.Triggers>
             <Trigger Property="IsSelected" Value="True"><Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource Ink}"/></Trigger>
+            <Trigger Property="IsExpanded" Value="False"><Setter TargetName="Items" Property="Visibility" Value="Collapsed"/><Setter TargetName="Body" Property="MinHeight" Value="4"/><Setter TargetName="Body" Property="Padding" Value="0"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>

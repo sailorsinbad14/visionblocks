@@ -604,6 +604,9 @@ public sealed partial class MainWindow : Window
         _tree.PreviewMouseMove += OnTreeMouseMove;
         _tree.PreviewMouseRightButtonDown += (_, e) => { if (ItemUnder(e.OriginalSource) is { } it) { it.IsSelected = true; it.Focus(); } };
         _tree.ContextMenu = BuildTreeMenu();
+        // 2026-11-25：作用域折叠 / 展开（小三角、键盘左右键、界面自动化都会触发这两个事件）
+        _tree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(OnFoldChanged));
+        _tree.AddHandler(TreeViewItem.CollapsedEvent, new RoutedEventHandler(OnFoldChanged));
 
         var body = new Grid();
         body.ColumnDefinitions.Add(_shelfCol = new ColumnDefinition { Width = new GridLength(196) });
@@ -841,6 +844,8 @@ public sealed partial class MainWindow : Window
     private void RebuildTree()
     {
         var sel = _selected;
+        // 选中的积木在折着的作用域里（撤销重做、粘贴进去、跳转以后）：一路展开到它（2026-11-25）
+        if ((sel is Block sb && _ed.Reveal(sb)) | (sel is ElseMarker sm && _ed.Reveal(sm.Owner))) _ed.ViewChanged();
         _treeSv ??= FindChild<ScrollViewer>(_tree);
         double keep = _treeSv?.VerticalOffset ?? 0;   // 重建会让树跳回顶部：先记下滚动位置，重建完放回去（2026-11-23）
         _tree.Items.Clear();
@@ -848,13 +853,13 @@ public sealed partial class MainWindow : Window
         TreeViewItem Node(Block b)
         {
             bool container = b is IContainerBlock or IfBlock;
-            var item = new TreeViewItem { Header = Header(b), Tag = b, IsExpanded = true, AllowDrop = true, Style = S(container ? "ContainerItem" : "BlockItem"), Background = CategoryBrush(b) };
+            var item = new TreeViewItem { Header = Header(b), Tag = b, IsExpanded = !(container && b.Collapsed), AllowDrop = true, Style = S(container ? "ContainerItem" : "BlockItem"), Background = CategoryBrush(b) };
             if (ReferenceEquals(b, sel)) toSelect = item;
             if (b is IContainerBlock c) foreach (var ch in c.Body) item.Items.Add(Node(ch));
             if (b is IfBlock ib)
             {
                 var marker = sel is ElseMarker em && ReferenceEquals(em.Owner, ib) ? (ElseMarker)sel : new ElseMarker(ib);
-                var els = new TreeViewItem { Header = ElseHeader(), Tag = marker, IsExpanded = true, AllowDrop = true, Style = S("ElseItem"), Background = Ui.FlowFg };
+                var els = new TreeViewItem { Header = ElseHeader(ib), Tag = marker, IsExpanded = !ib.ElseCollapsed, AllowDrop = true, Style = S("ElseItem"), Background = Ui.FlowFg };
                 if (ReferenceEquals(marker, sel)) toSelect = els;
                 foreach (var ch in ib.Else) els.Items.Add(Node(ch));
                 item.Items.Add(els);
@@ -888,11 +893,113 @@ public sealed partial class MainWindow : Window
 
     private static Brush CategoryBrush(Block b) => BlockText.CategoryOf(b) switch { BlockText.Category.Flow => Ui.FlowFg, BlockText.Category.Sense => Ui.SenseFg, _ => Ui.ActFg };
 
-    /// <summary>积木上的字：代码建的 TextBlock（ui.ps1 的 TextOf 要读得到），按宽度换行。</summary>
-    private UIElement Header(Block b) =>
-        new TextBlock { Text = BlockText.Summary(b, _ed.Program), Foreground = Brushes.White, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, FontSize = 13.5 };
+    /// <summary>积木上的字：代码建的 TextBlock（ui.ps1 的 TextOf 要读得到），按宽度换行。容器积木左边加折叠小三角，折着时后面写里面有几块（2026-11-25）。</summary>
+    private UIElement Header(Block b)
+    {
+        var text = new TextBlock { Text = BlockText.Summary(b, _ed.Program), Foreground = Brushes.White, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, FontSize = 13.5 };
+        if (b is not IContainerBlock c) return text;
+        return Foldable(text, b.Collapsed, CountIn(c.Body));
+    }
 
-    private static UIElement ElseHeader() => new TextBlock { Text = L.T("elseRow"), Foreground = Brushes.White, FontStyle = FontStyles.Italic, FontSize = 12.5 };
+    private UIElement ElseHeader(IfBlock ib) =>
+        Foldable(new TextBlock { Text = L.T("elseRow"), Foreground = Brushes.White, FontStyle = FontStyles.Italic, FontSize = 12.5 }, ib.ElseCollapsed, CountIn(ib.Else));
+
+    private static int CountIn(List<Block> list) => list.Sum(x => 1 + (x is IContainerBlock c ? CountIn(c.Body) : 0) + (x is IfBlock ib ? CountIn(ib.Else) : 0));
+
+    /// <summary>
+    /// 小三角（▾ 展开着 / ▸ 折着）+ 原来的字（+ 折着时「… 里面 N 块」）。三角画成图形，不是字：ui.ps1 按文字读树，不能多出符号。
+    /// 点三角只切换这一行的 IsExpanded，模型在 OnFoldChanged 里跟着改；键盘左右键、界面自动化的展开 / 折叠走同一条路。
+    /// </summary>
+    private UIElement Foldable(TextBlock text, bool collapsed, int inside)
+    {
+        var tri = new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse(collapsed ? "M1,0 L7,5 L1,10 Z" : "M0,1 L10,1 L5,7 Z"), Fill = Brushes.White,
+            Width = 10, Height = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+        };
+        var toggle = new Border { Child = tri, Width = 20, Height = 20, Margin = new Thickness(-6, 0, 4, 0), Background = Brushes.Transparent, Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Top };
+        toggle.ToolTip = L.T(collapsed ? "foldOpen" : "foldClose");
+        toggle.MouseLeftButtonDown += (s, e) =>
+        {
+            e.Handled = true;   // 不选中、不开始拖
+            _treeDragBlock = null;
+            if (ItemUnder(s) is { } it) it.IsExpanded = !it.IsExpanded;
+        };
+        var dp = new DockPanel();
+        DockPanel.SetDock(toggle, Dock.Left);
+        dp.Children.Add(toggle);
+        if (collapsed && inside > 0)
+        {
+            var more = new TextBlock { Text = string.Format(L.T("foldInside"), inside), Foreground = Brushes.White, Opacity = 0.85, FontSize = 12, Margin = new Thickness(8, 1, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+            DockPanel.SetDock(more, Dock.Right);
+            dp.Children.Add(more);
+        }
+        dp.Children.Add(text);
+        return dp;
+    }
+
+    /// <summary>程序树里某一行展开 / 折叠了（点小三角、键盘左右键、界面自动化）：写进积木，算改动但不占撤销。</summary>
+    private void OnFoldChanged(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not TreeViewItem it) return;
+        bool collapsed = !it.IsExpanded;
+        switch (it.Tag)
+        {
+            case Block b when b is IContainerBlock:
+                if (b.Collapsed == collapsed) return;
+                b.Collapsed = collapsed;
+                it.Header = Header(b);
+                break;
+            case ElseMarker em:
+                if (em.Owner.ElseCollapsed == collapsed) return;
+                em.Owner.ElseCollapsed = collapsed;
+                it.Header = ElseHeader(em.Owner);
+                break;
+            default: return;
+        }
+        // 折起来的作用域里有选中的积木：改选这个容器，免得选中项藏起来
+        if (collapsed && _selected is Block sel && !ReferenceEquals(sel, it.Tag) && ItemContains(it, sel)) { _selected = it.Tag; it.IsSelected = true; }
+        _ed.ViewChanged();
+        UpdateScopeUi();
+    }
+
+    private static bool ItemContains(TreeViewItem it, Block b)
+    {
+        foreach (var o in it.Items)
+            if (o is TreeViewItem ch && (ReferenceEquals(ch.Tag, b) || ItemContains(ch, b))) return true;
+        return false;
+    }
+
+    /// <summary>折叠 / 展开选中的容器（选中的是普通积木时折它外面那一层）；全部折叠 / 全部展开。</summary>
+    private void FoldSelected(bool collapse)
+    {
+        TreeViewItem? target = _selected switch
+        {
+            IContainerBlock and Block c => FindItem(c),
+            ElseMarker em => FindElseItem(em.Owner),
+            Block b when _ed.AncestorsOf(b) is { Count: > 0 } anc => anc[^1] is { IsElse: true, Owner: IfBlock ib } ? FindElseItem(ib) : FindItem(anc[^1].Owner),
+            _ => null
+        };
+        if (target == null) { Log(L.T("foldNothing")); return; }
+        target.IsExpanded = !collapse;
+    }
+
+    private void FoldAll(bool collapse)
+    {
+        void Walk(ItemCollection items)
+        {
+            foreach (var o in items)
+            {
+                if (o is not TreeViewItem it) continue;
+                Walk(it.Items);   // 先里后外：外层折起来以后里层也是折着的
+                if (it.Tag is IContainerBlock or ElseMarker) it.IsExpanded = !collapse;
+            }
+        }
+        Walk(_tree.Items);
+    }
+
+    private TreeViewItem? FindElseItem(IfBlock ib) =>
+        FindItem(ib) is { } it ? it.Items.OfType<TreeViewItem>().FirstOrDefault(x => x.Tag is ElseMarker em && ReferenceEquals(em.Owner, ib)) : null;
 
     /// <summary>属性改了以后只刷新树上的文字，不重建（重建会让正在输入的文本框丢焦点）。</summary>
     private void RefreshTreeText()
@@ -986,6 +1093,7 @@ public sealed partial class MainWindow : Window
             ["run"] = Run, ["stop"] = () => _run?.Stop(), ["openResults"] = OpenResults, ["freeze"] = Freeze,
             ["copy"] = CopySelected, ["cut"] = CutSelected, ["paste"] = PasteAtSelection, ["duplicate"] = DuplicateSelected,
             ["delete"] = DeleteSelected, ["moveUp"] = MoveSelectedUp, ["moveDown"] = MoveSelectedDown, ["indent"] = IndentSelected, ["outdent"] = OutdentSelected,
+            ["fold"] = () => FoldSelected(true), ["unfold"] = () => FoldSelected(false), ["foldAll"] = () => FoldAll(true), ["unfoldAll"] = () => FoldAll(false),
         };
         foreach (Tool t in Enum.GetValues<Tool>()) { var tt = t; c["tool" + t] = () => SetTool(tt); }
         foreach (var type in Keymap.PaletteTypes) { var ty = type; c["pal:" + type] = () => InsertFromPalette(ty); }
@@ -1097,11 +1205,11 @@ public sealed partial class MainWindow : Window
     private ContextMenu BuildTreeMenu()
     {
         var m = new ContextMenu();
-        void Item(string key, Action act, string aid, Brush? fg = null)
+        void Item(string key, Action act, string aid, Brush? fg = null, string? actionId = null)
         {
             var mi = new MenuItem();
             L.Reg(mi, HeaderedItemsControl.HeaderProperty, key);
-            string action = aid[3..].ToLowerInvariant();
+            string action = actionId ?? aid[3..].ToLowerInvariant();
             L.RegF(mi, MenuItem.InputGestureTextProperty, () => AppSettings.KeyOf(action));
             AutomationProperties.SetAutomationId(mi, aid);
             if (fg != null) mi.Foreground = fg;
@@ -1112,6 +1220,11 @@ public sealed partial class MainWindow : Window
         Item("btnCut", CutSelected, "ctxCut");
         Item("btnPaste", PasteAtSelection, "ctxPaste");
         Item("btnDuplicate", DuplicateSelected, "ctxDuplicate");
+        m.Items.Add(new Separator());
+        Item("foldClose", () => FoldSelected(true), "ctxFold");
+        Item("foldOpen", () => FoldSelected(false), "ctxUnfold");
+        Item("foldAll", () => FoldAll(true), "ctxFoldAll", actionId: "foldAll");
+        Item("unfoldAll", () => FoldAll(false), "ctxUnfoldAll", actionId: "unfoldAll");
         m.Items.Add(new Separator());
         Item("btnDelete", DeleteSelected, "ctxDelete", Ui.Bad);
         return m;
@@ -1174,8 +1287,9 @@ public sealed partial class MainWindow : Window
         (List<Block>, int, Point, double)? Below(TreeViewItem it, FrameworkElement h, bool isCap) => (isCap, it.Tag) switch
         {
             (true, Block c) => Slot(c, ProgramEditor.DropZone.After, Pt(it, 0, it.ActualHeight - 4), W(h)),
-            (false, ElseMarker em) => Slot(em.Owner, ProgramEditor.DropZone.ElseFirst, Pt(h, 30, h.ActualHeight + 4), W(h)),
-            (false, IContainerBlock and Block c) => Slot(c, ProgramEditor.DropZone.IntoFirst, Pt(h, 30, h.ActualHeight + 4), W(h)),
+            // 折着的容器（2026-11-25）：里面看不见，放进去就放到末尾
+            (false, ElseMarker em) => Slot(em.Owner, em.Owner.ElseCollapsed ? ProgramEditor.DropZone.ElseEnd : ProgramEditor.DropZone.ElseFirst, Pt(h, 30, h.ActualHeight + 4), W(h)),
+            (false, IContainerBlock and Block c) => Slot(c, c.Collapsed ? ProgramEditor.DropZone.BodyEnd : ProgramEditor.DropZone.IntoFirst, Pt(h, 30, h.ActualHeight + 4), W(h)),
             (false, Block b) => Slot(b, ProgramEditor.DropZone.After, Pt(h, 0, h.ActualHeight + 4), W(h)),
             _ => null
         };
@@ -1209,6 +1323,7 @@ public sealed partial class MainWindow : Window
         _treeSv ??= FindChild<ScrollViewer>(_tree);
         double y = e.GetPosition(_tree).Y;
         if (_treeSv != null) { if (y < 28) _treeSv.LineUp(); else if (y > _tree.ActualHeight - 28) _treeSv.LineDown(); }
+        HoverExpand(ItemUnder(e.OriginalSource));
         var drop = DropAt(e);
         bool copy = move && e.KeyStates.HasFlag(DragDropKeyStates.ControlKey);
         bool ok = drop != null && !(move && !copy && e.Data.GetData("vb-move") is Block src && ProgramEditor.Contains(src, drop.Value.List));
@@ -1274,7 +1389,45 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ClearDropHint() { _dropLayer.Children.Clear(); UpdateScopeUi(); }
+    private void ClearDropHint() { _dropLayer.Children.Clear(); HoverExpand(null); UpdateScopeUi(); }
+
+    private DispatcherTimer? _hoverTimer;
+    private TreeViewItem? _hoverItem;
+
+    /// <summary>拖着积木停在折着的容器上约 0.6 秒：自动展开，方便放到里面的某个位置（2026-11-25）。</summary>
+    private void HoverExpand(TreeViewItem? it)
+    {
+        if (it is { IsExpanded: false, Tag: IContainerBlock or ElseMarker })
+        {
+            if (ReferenceEquals(it, _hoverItem)) return;
+            _hoverItem = it;
+            _hoverTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+            _hoverTimer.Stop();
+            _hoverTimer.Tick -= OnHoverTick;
+            _hoverTimer.Tick += OnHoverTick;
+            _hoverTimer.Start();
+        }
+        else if (!ReferenceEquals(it, _hoverItem) && _hoverItem != null && (it == null || !ItemUnderIs(it, _hoverItem)))
+        {
+            _hoverItem = null;
+            _hoverTimer?.Stop();
+        }
+    }
+
+    private void OnHoverTick(object? s, EventArgs e)
+    {
+        _hoverTimer?.Stop();
+        if (_hoverItem != null) _hoverItem.IsExpanded = true;
+        _hoverItem = null;
+    }
+
+    /// <summary>it 是不是 parent 本身或者它里面的一行（鼠标在折着的容器的顶块文字上时，ItemUnder 拿到的就是它）。</summary>
+    private static bool ItemUnderIs(TreeViewItem it, TreeViewItem parent)
+    {
+        for (DependencyObject? x = it; x != null; x = VisualTreeHelper.GetParent(x))
+            if (ReferenceEquals(x, parent)) return true;
+        return false;
+    }
 
     // ───────────────────────── 作用域提示（2026-11-23） ─────────────────────────
 
@@ -1297,10 +1450,11 @@ public sealed partial class MainWindow : Window
         switch (_selected)
         {
             case Block b when _ed.Locate(b) is { } loc:
-                SetScopeBar(L.T("scopeAt") + Scope(loc.List) + " · " + string.Format(L.T("scopeNth"), loc.Index + 1, loc.List.Count), false);
+                SetScopeBar(L.T("scopeAt") + Scope(loc.List) + " · " + string.Format(L.T("scopeNth"), loc.Index + 1, loc.List.Count)
+                    + (b is IContainerBlock c && b.Collapsed ? " · " + string.Format(L.T("scopeFolded"), CountIn(c.Body)) : ""), false);
                 break;
             case ElseMarker em when _ed.Locate(em.Owner) is not null:
-                SetScopeBar(L.T("scopeAt") + Scope(em.Owner.Else), false);
+                SetScopeBar(L.T("scopeAt") + Scope(em.Owner.Else) + (em.Owner.ElseCollapsed ? " · " + string.Format(L.T("scopeFolded"), CountIn(em.Owner.Else)) : ""), false);
                 break;
             default:
                 SetScopeBar(L.T("scopeHint"), false);

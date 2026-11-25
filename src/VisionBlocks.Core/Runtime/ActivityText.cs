@@ -85,9 +85,11 @@ public static class ActivityText
                 "unsureAsk" => new("warn", "认图案", $"「{S(e, "field")}」分不开，停下来等你确认", "按键都已松开，靶子停在这一页"),
                 "unsureAnswer" => S(e, "how") switch
                 {
-                    "auto" => new("warn", "认图案", $"「{S(e, "field")}」分不开，先记成「{S(e, "value")}」接着跑", "这一行不会被去重并掉，回头在表里找它"),
-                    "timeout" => new("warn", "认图案", $"等了 {Mins(D(e, "ms"))}没人确认，先记成「{S(e, "value")}」接着跑", "这一行不会被去重并掉，回头在表里找它"),
+                    "auto" => new("warn", "认图案", $"「{S(e, "field")}」分不开，先记成「{S(e, "value")}」接着跑", "不和认出来的值撞，回头在表里找它"),
+                    "timeout" => new("warn", "认图案", $"等了 {Mins(D(e, "ms"))}没人确认，先记成「{S(e, "value")}」接着跑", "不和认出来的值撞，回头在表里找它"),
                     "stop" => new("bad", "认图案", "你在确认框里停止了运行"),
+                    "skip" => new("warn", "认图案", $"你选了先记成「{S(e, "value")}」接着跑", "回头在表里找它"),
+                    "remembered" => new("sense", "认图案", $"{S(e, "field")} = {S(e, "value")}", "和前面问过的是同一张图，用上次的结果，不再问"),
                     "saved" => new("sense", "认图案", $"你确认了：{S(e, "field")} = {S(e, "value")}", $"存成了新模板「{S(e, "template")}」，以后自动认"),
                     _ => new("sense", "认图案", $"你确认了：{S(e, "field")} = {S(e, "value")}")
                 },

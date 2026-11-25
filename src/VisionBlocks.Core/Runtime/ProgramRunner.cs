@@ -47,7 +47,8 @@ public sealed record UnsureRequest(ClassifyBlock Block, IReadOnlyList<(string Te
 /// <param name="Value">写进字段的值；null = 没人答（超时），按「不问」处理。</param>
 /// <param name="NewTemplate">用户存成了新模板：模板名（已经加进程序和这块认图案，运行器把它载进来）。</param>
 /// <param name="Stop">用户点了「停止运行」。</param>
-public sealed record UnsureAnswer(string? Value, string? NewTemplate = null, bool Stop = false);
+/// <param name="Skipped">用户点了「先记下接着跑」或者关掉了确认框（不是没人答）。</param>
+public sealed record UnsureAnswer(string? Value, string? NewTemplate = null, bool Stop = false, bool Skipped = false);
 
 /// <summary>
 /// 积木解释器。按「独立任务」模型来跑：
@@ -77,8 +78,11 @@ public sealed class ProgramRunner : IDisposable
     public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads;
     /// <summary>认图案的次数、其中分不太开的、有点像但没过门槛的；读文字读空后重读的次数、重读读出字的次数（2026-11-25）。</summary>
     public int Classifies, PatternClose, PatternMidway, Rereads, RereadHits;
-    /// <summary>认图案分不开的次数（= 分不太开 + 有点像但没过门槛）；其中用户在确认框里答了的次数。</summary>
-    public int Unsures, UnsureAnswered;
+    /// <summary>
+    /// 认图案分不开的次数（= 分不太开 + 有点像但没过门槛）；其中用户确认了值的、点了「先记下」的、
+    /// 和前面问过的是同一张图、直接用上次答案的次数。剩下的是没人确认（vbrun、设置成不问、超时）。
+    /// </summary>
+    public int Unsures, UnsureAnswered, UnsureSkipped, UnsureRemembered;
     public int RowsRecorded => _rec?.Rows ?? 0;
     public int Duplicates => _rec?.Duplicates ?? 0;
     public int EmptyKeys => _rec?.EmptyKeys ?? 0;
@@ -88,7 +92,7 @@ public sealed class ProgramRunner : IDisposable
     private sealed class StopSignal : Exception { }
     private sealed class UserStopSignal : Exception { }
 
-    /// <summary>认图案分不开、又没人确认时写的值：分数太近写「第一名?」，有点像但没过门槛写「未认出」——都不会和认出来的值撞，这一行不会被去重并掉。</summary>
+    /// <summary>认图案分不开、又没人确认时写的值：分数太近写「第一名?」，有点像但没过门槛写「未认出」——都不会和认出来的值撞（同名、角标也分不开的两件照样会按去重并成一行）。</summary>
     public static string UnsureValue(PatternClassifier.Result r) => r.Close ? r.Value + "?" : "未认出";
 
     public ProgramRunner(RunContext c)
@@ -118,7 +122,7 @@ public sealed class ProgramRunner : IDisposable
         {
             int released = _c.Input.ReleaseAll();
             _c.Log.Write(new { ev = "runEnd", result, released, Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads, rows = RowsRecorded, dups = Duplicates, emptyKeys = EmptyKeys,
-                Classifies, PatternClose, PatternMidway, Unsures, UnsureAnswered, Rereads, RereadHits, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
+                Classifies, PatternClose, PatternMidway, Unsures, UnsureAnswered, UnsureSkipped, UnsureRemembered, Rereads, RereadHits, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
             _rec?.Dispose();
             try { Manifest?.Finish(status, RowsRecorded, Duplicates, EmptyKeys); }
             catch (Exception e) { _c.Log.Write(new { ev = "manifestFailed", error = e.Message, t = BotLog.Now }); }
@@ -709,25 +713,40 @@ public sealed class ProgramRunner : IDisposable
 
     /// <summary>
     /// 认图案分不开（2026-11-25）：问用户（编辑器弹确认框，运行停在这里，按键都松开，靶子停在这一页）。
-    /// 没人问（vbrun、设置成「直接记录」）或等太久没人答，就写 <see cref="UnsureValue"/> 接着跑，这一行不会被去重并掉，回头在表里找得到。
+    /// 没人问（vbrun、设置成「直接记录」）、等太久没人答、用户点了「先记下」，就写 <see cref="UnsureValue"/> 接着跑：不和认出来的值撞，回头在表里找得到。
     /// 用户填了新名字、勾了存成模板：编辑器已经把模板加进程序和这块认图案，这里载进来，以后同样的角标自动认。
+    /// 同一次运行里又遇到同一张图（「重复直到没有新记录」会回头再看一遍同一件物品），直接用上次的结果、不再问：
+    /// 两次结果不一样（比如第一次选了 1天、第二次超时写了 1天?），同一件物品会被记成两行。
     /// </summary>
     private async Task<string> Unsure(ClassifyBlock cl, NormFrame f, RegionDef roi, PatternClassifier.Result res, CancellationToken ct)
     {
         Unsures++;
         string fallback = UnsureValue(res);
+        var rpx = f.ToPixels(roi);
+        var top = res.All.Where(c => c.Box != null).OrderByDescending(c => c.Score).FirstOrDefault();
+        var keyPx = top?.Box is { } kb ? f.ToPixels(kb) : rpx;   // 认的是最像的那一块（没有就用整个热区）
+        var key = new Mat(f.Gray, keyPx).Clone();
+        var seen = _unsureSeen.FirstOrDefault(x => x.Field == cl.Field && SamePicture(x.Gray, key));
+        if (seen.Gray != null)
+        {
+            key.Dispose();
+            UnsureRemembered++;
+            _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "remembered", value = seen.Value, t = BotLog.Now });
+            Publish($"{cl.Field}：{seen.Value}（和前面问过的同一张图，用上次的结果）");
+            return seen.Value;
+        }
+        string Remember(string v) { _unsureSeen.Add((cl.Field, key, v)); return v; }
         if (_c.AskUnsure == null)
         {
+            key.Dispose();   // 不问时结果每次都一样，不用记
             _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "auto", value = fallback, t = BotLog.Now });
             return fallback;
         }
         _c.Input.ReleaseAll();
-        var rpx = f.ToPixels(roi);
         byte[] regionPng;
         using (var rc = new Mat(f.Bgr, rpx)) Cv2.ImEncode(".png", rc, out regionPng);
         byte[]? badgePng = null;
         (int, int, int, int)? inRegion = null;
-        var top = res.All.Where(c => c.Box != null).OrderByDescending(c => c.Score).FirstOrDefault();
         if (top?.Box is { } b)
         {
             var bpx = f.ToPixels(b);
@@ -745,21 +764,25 @@ public sealed class ProgramRunner : IDisposable
         var sw = Stopwatch.StartNew();
         UnsureAnswer? ans;
         try { ans = await _c.AskUnsure(req, ct); }
+        catch { key.Dispose(); throw; }
         finally { _heldMs += sw.ElapsedMilliseconds; }
         long ms = sw.ElapsedMilliseconds;
-        if (ans == null)
+        if (ans is { Stop: true })
         {
-            _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "timeout", value = fallback, ms, t = BotLog.Now });
-            Publish($"{cl.Field}：{fallback}（没人确认，先这样记，接着跑）");
-            return fallback;
-        }
-        if (ans.Stop)
-        {
+            key.Dispose();
             _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = "stop", ms, t = BotLog.Now });
             throw new UserStopSignal();
         }
+        if (ans == null || ans.Skipped || string.IsNullOrWhiteSpace(ans.Value))
+        {
+            bool skipped = ans != null;
+            if (skipped) UnsureSkipped++;
+            _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how = skipped ? "skip" : "timeout", value = fallback, ms, t = BotLog.Now });
+            Publish($"{cl.Field}：{fallback}（{(skipped ? "你选了先这样记" : "没人确认，先这样记")}，接着跑）");
+            return Remember(fallback);
+        }
         UnsureAnswered++;
-        string v = string.IsNullOrWhiteSpace(ans.Value) ? fallback : ans.Value.Trim();
+        string v = ans.Value.Trim();
         if (ans.NewTemplate is { } nt && _c.Program.Templates.TryGetValue(nt, out var def))
         {
             if (_templates.Remove(nt, out var old)) old.Dispose();
@@ -769,12 +792,27 @@ public sealed class ProgramRunner : IDisposable
         string how = ans.NewTemplate != null ? "saved" : v == cl.NoneText || cands.Any(c => c.Value == v) ? "picked" : "typed";
         _c.Log.Write(new { ev = "unsureAnswer", field = cl.Field, how, value = v, template = ans.NewTemplate, ms, t = BotLog.Now });
         Publish($"{cl.Field}：{v}（你确认的）");
-        return v;
+        return Remember(v);
+    }
+
+    /// <summary>这次运行里问过的图（灰度，最像的那一块）和结果，按写进的字段分开（同一个字段、同一张图 = 同一个值）。</summary>
+    private readonly List<(string Field, Mat Gray, string Value)> _unsureSeen = new();
+
+    /// <summary>同一张图：尺寸一样，灰度差超过 40 的像素不到 1%。同一件物品再看一次几乎逐像素一样；只差一个数字的两种角标差得远。</summary>
+    public static bool SamePicture(Mat a, Mat b)
+    {
+        if (a.Size() != b.Size()) return false;
+        using var d = new Mat();
+        Cv2.Absdiff(a, b, d);
+        using var m = new Mat();
+        Cv2.Threshold(d, m, 40, 255, ThresholdTypes.Binary);
+        return Cv2.CountNonZero(m) <= 0.01 * a.Rows * a.Cols;
     }
 
     public void Dispose()
     {
         foreach (var t in _templates.Values) t.Dispose();
+        foreach (var x in _unsureSeen) x.Gray.Dispose();
         _frame?.Dispose();
     }
 }

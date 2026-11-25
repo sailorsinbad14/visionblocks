@@ -144,8 +144,9 @@ internal static class Ui
     /// <summary>
     /// 认图案分不开时的确认框（2026-11-25）：热区截图（红框 = 最像的那一块）、这件物品已经读到的字段、
     /// 候选值按钮（点一下就接着跑）、「都不是，叫它：」+「存成新模板」、「先记成「1天?」接着跑」、「停止运行」。
-    /// 不是模态框：主窗口的「■ 停止」、急停热键照样能用。answer 只调一次；关掉这个框 = 先记下接着跑；timeoutMinutes 为 0 = 一直等。
-    /// saveTemplate(名字) 把红框里的图存成模板，返回模板名。
+    /// 不是模态框：主窗口的「■ 停止」、急停热键照样能用。answer 只调一次，在框关掉以后调（关有主窗口的框时 Windows 会把主窗口激活，
+    /// 之后再把靶子切回前台才不会被抢回来）。关掉这个框 = 先记下接着跑；倒计时到了 = 没人答（null）；timeoutMinutes 为 0 = 一直等。
+    /// 用户在框里点了或按了键，倒计时就停：不在用户答到一半时替他做决定。saveTemplate(名字) 把红框里的图存成模板，返回模板名。
     /// </summary>
     public static Window UnsureDialog(Window owner, UnsureRequest q, string fallback, int timeoutMinutes, Action<UnsureAnswer?> answer, Func<string, string> saveTemplate)
     {
@@ -154,10 +155,17 @@ internal static class Ui
         AutomationProperties.SetAutomationId(w, "unsureDialog");
         bool done = false;
         System.Windows.Threading.DispatcherTimer? timer = null;
-        void Done(UnsureAnswer? a) { if (done) return; done = true; timer?.Stop(); answer(a); w.Close(); }
-        w.Closed += (_, _) => { timer?.Stop(); if (!done) { done = true; answer(null); } };
+        void Done(UnsureAnswer? a) { if (done) return; done = true; timer?.Stop(); w.Close(); answer(a); }
+        w.Closed += (_, _) => { timer?.Stop(); if (!done) { done = true; answer(new UnsureAnswer(null, Skipped: true)); } };
 
         var sp = new StackPanel { Margin = new Thickness(22, 18, 22, 18), Width = 460 };
+        // 框是从后台弹出来的，Windows 一般不让它拿到键盘：键盘还在靶子上，先提醒点一下再打字
+        var focusHint = new Border { Background = (Brush)Theme["WarnSoft"], BorderBrush = (Brush)Theme["Warn"], BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 0, 0, 8),
+            Child = Label(L.T("unsureClickFirst"), 12) };
+        AutomationProperties.SetAutomationId(focusHint, "unsureClickFirst");
+        sp.Children.Add(focusHint);
+        w.Activated += (_, _) => focusHint.Visibility = Visibility.Collapsed;
+        w.Deactivated += (_, _) => { if (!done) focusHint.Visibility = Visibility.Visible; };
         sp.Children.Add(new TextBlock { Text = string.Format(L.T("unsureHead"), q.Block.Field), FontSize = 18, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Theme["DisplayFont"], Margin = new Thickness(0, 0, 0, 4) });
         var best = q.Candidates.GroupBy(c => c.Value).Select(g => g.First()).ToList();   // 同一个值只留分最高的那张
         sp.Children.Add(Label(string.Join(" · ", best.Take(3).Select(c => $"{c.Value} {c.Score:0.00}")), 12, (Brush)Theme["Text2"]));
@@ -246,7 +254,7 @@ internal static class Ui
         var bottom = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var skip = new Button { Content = string.Format(L.T("unsureSkip"), fallback), Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(12, 4, 12, 4) };
         AutomationProperties.SetAutomationId(skip, "unsureSkip");
-        skip.Click += (_, _) => Done(null);
+        skip.Click += (_, _) => Done(new UnsureAnswer(null, Skipped: true));
         var stop = new Button { Content = L.T("unsureStop"), Padding = new Thickness(12, 4, 12, 4), Foreground = Bad };
         AutomationProperties.SetAutomationId(stop, "unsureStop");
         stop.Click += (_, _) => Done(new UnsureAnswer(null, Stop: true));
@@ -268,6 +276,15 @@ internal static class Ui
             timer.Tick += (_, _) => Tick();
             Tick();
             timer.Start();
+            // 用户动了这个框：不再倒计时
+            void Touched()
+            {
+                if (timer == null || !timer.IsEnabled) return;
+                timer.Stop();
+                countdown.Text = L.T("unsureCountdownStopped");
+            }
+            sp.PreviewMouseDown += (_, _) => Touched();
+            sp.PreviewKeyDown += (_, _) => Touched();
         }
         w.Loaded += (_, _) => { tb.Focus(); try { System.Media.SystemSounds.Exclamation.Play(); } catch { } };
         return w;

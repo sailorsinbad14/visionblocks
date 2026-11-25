@@ -85,18 +85,18 @@ public static class UnsureSelfTest
             Check("表里写的是「1天?」，第二次按去重跳过", csv.Contains("1天?") && r.RowsRecorded == 1 && r.Duplicates == 1, $"{r.RowsRecorded} 行，跳过 {r.Duplicates}");
         }
 
-        Console.WriteLine("2. 问了没人答（等太久）：照样写「1天?」接着跑");
+        Console.WriteLine("2. 问了没人答（等太久）：照样写「1天?」接着跑；第二次是同一张图，用上次的结果、不再问");
         {
             var (ed, _) = NewProgram(false);
             UnsureRequest? got = null;
             var (res, r, lines, csv) = Run(ed, (q, ct) => { got = q; return Task.FromResult<UnsureAnswer?>(null); });
-            Check("运行完成，问了两次", res == "完成" && Ev(lines, "unsureAsk") == 2 && Ev(lines, "unsureAnswer") == 2 && Has(lines, "\"how\":\"timeout\""));
+            Check("运行完成，只问了一次", res == "完成" && Ev(lines, "unsureAsk") == 1 && Has(lines, "\"how\":\"timeout\"") && Has(lines, "\"how\":\"remembered\"") && r.UnsureRemembered == 1);
             Check("表里是「1天?」", csv.Contains("1天?") && r.RowsRecorded == 1);
             Check("问的内容：分数从高到低、带热区截图和角标截图、角标在热区里",
                 got != null && got.Close && got.Candidates.Count == 2 && got.Candidates[0].Score >= got.Candidates[1].Score && got.Candidates[0].Value == "1天"
                 && got.RegionPng.Length > 100 && got.BadgePng is { Length: > 100 } && got.BadgeInRegion is { } bi && bi.X >= 0 && bi.Y >= 0 && bi.X + bi.W <= 125 && bi.Y + bi.H <= 75,
                 got == null ? "没问" : $"{got.Candidates[0].Value} {got.Candidates[0].Score:0.000} / {got.Candidates[1].Value} {got.Candidates[1].Score:0.000}，角标 {got.BadgeInRegion}");
-            Check("第二次问时不把上一行留下的值当成这件物品的", got != null && got.Row.Count == 0, got == null ? "" : string.Join("，", got.Row));
+            Check("问的时候这件物品还没读到别的字段", got != null && got.Row.Count == 0, got == null ? "" : string.Join("，", got.Row));
             using (var rec = new Recorder(Path.Combine(ed.Dir, "rec"), ed.Program))
             {
                 rec.Set("有效期", "3天");
@@ -136,11 +136,31 @@ public static class UnsureSelfTest
             Check("存了模板算一步改动（关窗会问保存），存盘后读得回来", ed.Dirty && Reload(ed).Templates.ContainsKey("7天"));
         }
 
-        Console.WriteLine("5. 选了已有的值（不存模板）：写那个值");
+        Console.WriteLine("5. 选了已有的值（不存模板）：写那个值；再遇到同一张图不再问——第二次就算会超时，也不会把同一件物品记成两行");
         {
             var (ed, _) = NewProgram(false);
-            var (res, r, lines, csv) = Run(ed, (q, ct) => Task.FromResult<UnsureAnswer?>(new UnsureAnswer("3天")));
-            Check("表里是「3天」，记作「选的」", res == "完成" && csv.Contains("3天") && r.RowsRecorded == 1 && Has(lines, "\"how\":\"picked\"") && r.UnsureAnswered == 2);
+            int asks = 0;
+            var (res, r, lines, csv) = Run(ed, (q, ct) => Task.FromResult<UnsureAnswer?>(++asks == 1 ? new UnsureAnswer("3天") : null));
+            Check("问了一次，表里一行「3天」，第二次用上次的结果、按去重跳过", res == "完成" && asks == 1 && csv.Contains("3天") && !csv.Contains("1天?")
+                && r.RowsRecorded == 1 && r.Duplicates == 1 && Has(lines, "\"how\":\"picked\"") && Has(lines, "\"how\":\"remembered\"") && r.UnsureAnswered == 1,
+                $"问了 {asks} 次，{r.RowsRecorded} 行，跳过 {r.Duplicates}");
+        }
+
+        Console.WriteLine("6. 点「先记成「1天?」接着跑」（或关掉确认框）：写「1天?」，记作「你选的」，不算没人确认");
+        {
+            var (ed, _) = NewProgram(false);
+            var (res, r, lines, csv) = Run(ed, (q, ct) => Task.FromResult<UnsureAnswer?>(new UnsureAnswer(null, Skipped: true)));
+            Check("表里是「1天?」，日志 how=skip", res == "完成" && csv.Contains("1天?") && Has(lines, "\"how\":\"skip\"") && r.UnsureSkipped == 1 && r.UnsureRemembered == 1);
+        }
+
+        Console.WriteLine("7. 「同一张图」怎么算：同一张角标再截一次算同一张，只差一个数字的两种角标不算");
+        {
+            using var g1 = Cv2.ImRead(Path.Combine(src, "templates", "badge-1d.png"), ImreadModes.Grayscale);
+            using var g3 = Cv2.ImRead(Path.Combine(src, "templates", "badge-3d.png"), ImreadModes.Grayscale);
+            using var noisy = g1.Clone();
+            using (var noise = new Mat(g1.Size(), MatType.CV_8UC1)) { Cv2.Randu(noise, 0, 12); Cv2.Add(noisy, noise, noisy); }
+            Check("1天 加一点噪声：同一张", ProgramRunner.SamePicture(g1, noisy));
+            Check("1天 和 3天：不是同一张", g1.Size() == g3.Size() && !ProgramRunner.SamePicture(g1, g3), $"{g1.Size()} / {g3.Size()}");
         }
         try { Directory.Delete(root, true); } catch { }
 

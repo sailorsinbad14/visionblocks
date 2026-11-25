@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
@@ -2136,7 +2136,7 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// 认图案分不开（2026-11-25）：运行器在后台线程上调，这里到界面线程弹确认框，等用户答、倒计时到或运行被停。
-    /// 答完（停止除外）把靶子切回前台再接着跑；存成新模板时刷新资源区。编辑器最小化着时先还原，不然确认框跟着藏起来。
+    /// 答完（停止除外）框先关，再把靶子切回前台，然后才接着跑；存成新模板时刷新资源区。编辑器最小化着时先还原，不然确认框跟着藏起来。
     /// </summary>
     private Task<UnsureAnswer?> AskUnsure(ProgramEditor ed, IntPtr target, UnsureRequest q, int minutes, CancellationToken ct)
     {
@@ -2150,8 +2150,13 @@ public sealed partial class MainWindow : Window
             {
                 reg.Dispose();
                 _unsure = null;
-                if (a?.Stop != true && !ct.IsCancellationRequested && !WindowInfo.TrySetForeground(target)) Log(L.T("unsureFgFail"));
-                tcs.TrySetResult(a);
+                if (a?.Stop == true || ct.IsCancellationRequested) { tcs.TrySetResult(a); return; }
+                // 框已经关了；等 Windows 把主窗口激活完，再把靶子切回前台，然后才让运行接着走
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+                {
+                    if (!WindowInfo.TrySetForeground(target)) Log(L.T("unsureFgFail"));
+                    tcs.TrySetResult(a);
+                });
             }, name =>
             {
                 string tpl = ed.AddTemplateFromPng(name, q.BadgePng!, q.Block);

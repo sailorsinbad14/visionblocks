@@ -40,6 +40,8 @@ public static class ActivitySelfTest
         Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"timeout\",\"value\":\"1天?\",\"ms\":120000,\"t\":1}", "warn", "认图案", "等了 2 分钟没人确认，先记成「1天?」");
         Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"auto\",\"value\":\"未认出\",\"t\":1}", "warn", "认图案", "先记成「未认出」接着跑");
         Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"stop\",\"ms\":800,\"t\":1}", "bad", "认图案", "停止了运行");
+        Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"skip\",\"value\":\"1天?\",\"ms\":3000,\"t\":1}", "warn", "认图案", "你选了先记成「1天?」");
+        Check("{\"ev\":\"unsureAnswer\",\"field\":\"有效期\",\"how\":\"remembered\",\"value\":\"3天\",\"t\":1}", "sense", "认图案", "用上次的结果");
         Check("{\"ev\":\"row\",\"key\":\"碧落战斧|3天\",\"rows\":12,\"t\":1}", "act", "记录一行", "记下第 12 行");
         Check("{\"ev\":\"dup\",\"key\":\"名称、有效期都和第 7 行一样（碧落战斧 · 1天）\",\"rows\":12,\"t\":1}", "act", "记录一行", "都和第 7 行一样");
         Check("{\"ev\":\"pass\",\"pass\":2,\"added\":4,\"atEnd\":false,\"t\":1}", "flow", "重复直到没有新记录", "第 2 遍做完，新记下 4 行");

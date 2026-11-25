@@ -117,11 +117,22 @@ internal sealed class StudioRun
             + (runner.Rereads > 0 ? $"；读空后放大再读 {runner.Rereads} 次，读出字 {runner.RereadHits} 次" : "")
             + (runner.Classifies > 0 ? $"；认图案 {runner.Classifies} 次" + (runner.PatternClose + runner.PatternMidway > 0
                 ? $"（分不太开 {runner.PatternClose} 次、有点像但没过门槛 {runner.PatternMidway} 次：可能有还没裁模板的新图案，看活动里的提醒；"
-                  + (runner.UnsureAnswered > 0 ? $"你确认了 {runner.UnsureAnswered} 次" : "")
-                  + (runner.Unsures - runner.UnsureAnswered > 0 ? $"{(runner.UnsureAnswered > 0 ? "，" : "")}{runner.Unsures - runner.UnsureAnswered} 次没人确认、先记成带问号的值或「未认出」" : "") + "）" : "") : "");
+                  + UnsureSummary(runner) + "）" : "") : "");
         log.Dispose();
         try { File.Copy(botPath, Path.Combine(OutDir, $"bot-{DateTime.Now:HHmmss}.jsonl"), true); } catch { }
         return summary;
+    }
+
+    /// <summary>认图案分不开时各种结果的次数：你确认了 / 你选了先记下 / 同一张图用了上次的结果 / 没人确认。</summary>
+    private static string UnsureSummary(ProgramRunner r)
+    {
+        int none = r.Unsures - r.UnsureAnswered - r.UnsureSkipped - r.UnsureRemembered;
+        var parts = new List<string>();
+        if (r.UnsureAnswered > 0) parts.Add($"你确认了 {r.UnsureAnswered} 次");
+        if (r.UnsureSkipped > 0) parts.Add($"你选了先记下 {r.UnsureSkipped} 次");
+        if (r.UnsureRemembered > 0) parts.Add($"同一张图用了上次的结果 {r.UnsureRemembered} 次");
+        if (none > 0) parts.Add($"{none} 次没人确认、先记成带问号的值或「未认出」");
+        return string.Join("，", parts);
     }
 
     /// <summary>显示到活动里的事件：ActivityText 会翻译的那些（2026-11-25 加了重复跳过、读文字、认图案、拖动 / 滚轮结果、网格挪动）。</summary>

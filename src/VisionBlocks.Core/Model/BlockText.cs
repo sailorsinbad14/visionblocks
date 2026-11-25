@@ -46,7 +46,7 @@ public static class BlockText
         TypeTextBlock t => $"输入文字「{t.Text}」",
         StopBlock => "停止",
         ForEachCellBlock f => $"对网格「{LG(p, f.Grid)}」的每一格",
-        UntilNoNewRowsBlock u => $"重复直到这一遍没有新记录（最多 {u.MaxTimes} 遍）",
+        UntilNoNewRowsBlock u => $"重复直到这一遍没有新记录{(u.StopAtEnd ? "或拖到底" : "")}（最多 {u.MaxTimes} 遍）",
         WheelBlock { DistancePx: int d } w => $"在「{R(p, w.Region)}」滚轮{(d > 0 ? "向下" : "向上")} {Math.Abs(d)} px（边滚边量）",
         WheelBlock w => $"在「{(w.Point != null ? LP(p, w.Point) : R(p, w.Region))}」滚轮{(w.Notches > 0 ? "向下" : "向上")} {Math.Abs(w.Notches)} 格",
         DragBlock d => $"在「{R(p, d.Region)}」按住拖动，{(d.DistancePx > 0 ? "向下翻" : "向上翻")} {Math.Abs(d.DistancePx)} px（边拖边量）",

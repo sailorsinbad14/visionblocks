@@ -214,7 +214,9 @@ public sealed partial class MainWindow
                 break;
             case UntilNoNewRowsBlock un:
                 Row("最多几遍", Num(un.MaxTimes, v => un.MaxTimes = (int)v, 1, 1000), "pMaxTimes");
+                Row("拖到底也停", Check(L.Z("拖动 / 按距离滚一点没动、到底了，这一遍做完就停"), un.StopAtEnd, v => un.StopAtEnd = v), "pStopAtEnd");
                 Note("反复执行下面的积木（通常是「逐格点开 → 记录一行 → 滚轮翻页」），直到某一遍一条新记录都没有，就当作翻到底了。最多几遍是保险：去重失效时也不会一直翻下去。");
+                Note("勾上「拖到底也停」：这一遍里的「拖动」或「按距离滚」一点没动、报了到底，这一遍做完就停，不用再点一遍全是重复的，关了去重也能停。走了一部分才到底的不算（下一遍还要读刚露出来的行）；按格数滚的滚轮量不到距离，不算。");
                 break;
             case WheelBlock wb:
             {

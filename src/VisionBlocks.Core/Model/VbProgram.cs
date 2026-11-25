@@ -228,6 +228,11 @@ public sealed class ForEachCellBlock : Block, IContainerBlock
 public sealed class UntilNoNewRowsBlock : Block, IContainerBlock
 {
     public int MaxTimes { get; set; } = 30;
+    /// <summary>
+    /// 这一遍里有一块「拖动」或「按距离滚」一点没动（不到 0.5 px）并且报到底，这一遍做完就停（2026-11-25）。
+    /// 去重有失误、或者关了去重时也能停。走了一部分才到底的不算：下一遍还要读刚露出来的行。旧程序没写这一项也是开。
+    /// </summary>
+    public bool StopAtEnd { get; set; } = true;
     public List<Block> Body { get; set; } = new();
 }
 

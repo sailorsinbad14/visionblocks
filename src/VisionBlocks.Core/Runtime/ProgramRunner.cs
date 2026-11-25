@@ -51,6 +51,8 @@ public sealed class ProgramRunner : IDisposable
     /// 「对每一格」按它把网格下移「少走的距离按行距取余」；进入「重复直到没有新记录」时清零（换分类后列表回到顶）。
     /// </summary>
     private readonly Dictionary<string, (double Shortfall, string Region)> _gridShift = new();
+    /// <summary>这一遍里有没有一块「拖动」「按距离滚」一点没动并报到底（「重复直到没有新记录」按它停，2026-11-25）。</summary>
+    private bool _atEndNoMove;
 
     public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads;
     /// <summary>认图案的次数、其中分不太开的、有点像但没过门槛的；读文字读空后重读的次数、重读读出字的次数（2026-11-25）。</summary>
@@ -193,16 +195,23 @@ public sealed class ProgramRunner : IDisposable
                 if (_gridShift.Count > 0) _c.Log.Write(new { ev = "gridShiftReset", grids = _gridShift.Keys.ToArray(), t = BotLog.Now });
                 _gridShift.Clear();   // 换了分类 / 列表，回到顶，网格回原位
                 int pass = 0;
-                while (true)
+                bool outerAtEnd = _atEndNoMove;   // 里面再套一层时，里层的到底不影响外层
+                try
                 {
-                    pass++;
-                    int before = RowsRecorded;
-                    await ExecList(un.Body, ct);
-                    int added = RowsRecorded - before;
-                    _c.Log.Write(new { ev = "pass", pass, added, t = BotLog.Now });
-                    if (added == 0) break;
-                    if (pass >= un.MaxTimes) { _c.Log.Write(new { ev = "loopCap", pass, t = BotLog.Now }); break; }
+                    while (true)
+                    {
+                        pass++;
+                        int before = RowsRecorded;
+                        _atEndNoMove = false;
+                        await ExecList(un.Body, ct);
+                        int added = RowsRecorded - before;
+                        _c.Log.Write(new { ev = "pass", pass, added, atEnd = _atEndNoMove, t = BotLog.Now });
+                        if (added == 0) break;
+                        if (un.StopAtEnd && _atEndNoMove) { _c.Log.Write(new { ev = "loopAtEnd", pass, t = BotLog.Now }); Publish($"拖到底了，画面一点没动：第 {pass} 遍做完就停"); break; }
+                        if (pass >= un.MaxTimes) { _c.Log.Write(new { ev = "loopCap", pass, t = BotLog.Now }); break; }
+                    }
                 }
+                finally { _atEndNoMove = outerAtEnd; }
                 break;
             }
             case WheelBlock { DistancePx: int dist } wd:
@@ -235,6 +244,7 @@ public sealed class ProgramRunner : IDisposable
                     carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), t = BotLog.Now
                 });
                 string shiftNote = NoteShortfall(wd.Region!, roi, dist + res.CarryIn, res.Moved, res.Reason);
+                if (EndedWithoutMoving(res.Reason, res.Moved)) _atEndNoMove = true;
                 Publish(res.Reason switch
                 {
                     "end" => $"滚轮：到底了，滚了 {res.Moved:0} / {dist} px",
@@ -548,6 +558,8 @@ public sealed class ProgramRunner : IDisposable
             end = res.End, reason = res.Reason, fails = res.MeasureFails, carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), hold = res.HoldMs, t = BotLog.Now
         });
         string shiftNote = NoteShortfall(db.Region, roi, dist + res.CarryIn, res.Moved, res.Reason);
+        // 只认「到底而且一点没动」：走了一部分才到底的，下一遍还要读刚露出来的行；量不出、被拦、动了鼠标都不算到底
+        if (EndedWithoutMoving(res.Reason, res.Moved)) _atEndNoMove = true;
         Publish(res.Reason switch
         {
             "end" => $"拖动：到底了，拖了 {res.Moved:0} / {dist} px",
@@ -557,6 +569,9 @@ public sealed class ProgramRunner : IDisposable
             _ => $"拖动 {res.Moved:0} / {dist} px"
         } + (res.HoldMs > hold ? $"（松手后列表还在滑，松手前停顿已加长到 {res.HoldMs} ms）" : "") + shiftNote);
     }
+
+    /// <summary>「拖到底就停」认的到底：积木自己判断到底了，而且这一块一点没动（不到 0.5 px）。量不出、被拦、动了鼠标都不算。</summary>
+    public static bool EndedWithoutMoving(string reason, double moved) => reason == "end" && Math.Abs(moved) < 0.5;
 
     /// <summary>
     /// 拖动 / 按距离滚停下以后，把少走的距离记到这个热区里的网格上（2026-11-25）。返回一句附在运行信息后面的话。

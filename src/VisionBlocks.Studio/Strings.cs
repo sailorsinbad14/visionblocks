@@ -115,6 +115,7 @@ internal static class L
         ["点击"] = "Click", ["输入文字"] = "Type text", ["停止"] = "Stop", ["对每一格"] = "For each cell", ["重复直到没有新记录"] = "Repeat until no new rows",
         ["滚轮"] = "Wheel", ["拖动"] = "Drag", ["在哪个热区拖"] = "Drag in region", ["距离 px（正数向下翻）"] = "Distance px (positive = page down)",
         ["速度 px/秒"] = "Speed px/s", ["松手前停顿 ms"] = "Pause before release (ms)", ["读文字"] = "Read text", ["截图存图"] = "Save image", ["记录一行"] = "Record row",
+        ["拖到底也停"] = "Stop at list end", ["拖动 / 按距离滚一点没动、到底了，这一遍做完就停"] = "Stop after this pass when a drag or distance scroll hits the end without moving",
         ["认图案"] = "Match pattern", ["比哪些模板"] = "Templates to compare", ["门槛"] = "Threshold", ["都不像时写"] = "Value when none match",
         ["试一下（在冻结帧上）"] = "Try it (on the frozen frame)",
         ["看到图像"] = "Sees image", ["颜色占比"] = "Color ratio", ["文字包含"] = "Text contains",

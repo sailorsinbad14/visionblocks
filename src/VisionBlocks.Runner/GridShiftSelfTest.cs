@@ -59,6 +59,15 @@ public static class GridShiftSelfTest
         string json = System.Text.Json.JsonSerializer.Serialize(items, ProgramIO.Options);
         Check("网格存盘没有 pitch / bounds", !json.Contains("pitch") && !json.Contains("bounds"), json.Replace("\n", " ").Replace("  ", ""));
 
+        Console.WriteLine("6. 拖到底就停：只认「到底而且一点没动」");
+        Check("到底、一点没动 → 算", Core.Runtime.ProgramRunner.EndedWithoutMoving("end", 0.2));
+        Check("到底、走了 330 → 不算（下一遍还要读刚露出来的行）", !Core.Runtime.ProgramRunner.EndedWithoutMoving("end", 330));
+        Check("往上拖到顶、走了 -90 → 不算", !Core.Runtime.ProgramRunner.EndedWithoutMoving("end", -90));
+        foreach (var r in new[] { "cantMeasure", "blocked", "userMouse", "aborted", "done", "maxStrokes" })
+            Check($"{r}、没动 → 不算", !Core.Runtime.ProgramRunner.EndedWithoutMoving(r, 0));
+        var un = System.Text.Json.JsonSerializer.Deserialize<VbProgram>("{\"program\":[{\"type\":\"untilNoNewRows\",\"maxTimes\":10,\"body\":[]}]}", ProgramIO.Options)!;
+        Check("旧程序没写这一项：默认开", un.Program[0] is UntilNoNewRowsBlock { StopAtEnd: true });
+
         Console.WriteLine(fails == 0 ? "网格跟着挪自测全部通过" : $"网格跟着挪自测失败 {fails} 项");
         return fails == 0 ? 0 : 1;
     }

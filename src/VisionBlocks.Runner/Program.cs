@@ -49,6 +49,7 @@ public static class Program
                 "selftest-keymap" => KeymapSelfTest.Run(),
                 "selftest-pattern" => PatternSelfTest.Run(positional),
                 "selftest-gridshift" => GridShiftSelfTest.Run(),
+                "selftest-activity" => ActivitySelfTest.Run(),
                 "run" => RunProgram(positional.FirstOrDefault() ?? throw new ArgumentException("缺少程序文件路径"), opts),
                 _ => throw new ArgumentException("未知子命令 " + args[0])
             };

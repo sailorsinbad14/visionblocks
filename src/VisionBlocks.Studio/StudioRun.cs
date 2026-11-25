@@ -120,12 +120,8 @@ internal sealed class StudioRun
         return summary;
     }
 
-    private static readonly HashSet<string> Shown = new()
-    {
-        "runStart", "runEnd", "keydown", "clickConfirm", "wait", "blocked", "imeOff", "waitTimeout", "loopTimeout",
-        "paused", "resumed", "emergencyStop", "noFrame", "frameBack", "sendFailed",
-        "row", "pass", "loopCap"
-    };
+    /// <summary>显示到活动里的事件：ActivityText 会翻译的那些（2026-11-25 加了重复跳过、读文字、认图案、拖动 / 滚轮结果、网格挪动）。</summary>
+    private static readonly HashSet<string> Shown = ActivityText.Events;
 
     private static void FilterLog(string line, Action<string> onLog)
     {
@@ -134,8 +130,9 @@ internal sealed class StudioRun
         if (i < 0) return;
         int j = line.IndexOf('"', i + 6);
         string ev = line[(i + 6)..j];
+        // 2026-11-25：整行交给编辑器（ActivityText 翻成人话），不再截断——截断的 JSON 解析不了
         if (Shown.Contains(ev) || (ev == "cond" && line.Contains("\"kind\":\"text\"")))
-            onLog(line.Length > 220 ? line[..220] + "…" : line);
+            onLog(line);
     }
 }
 

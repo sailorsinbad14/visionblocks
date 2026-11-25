@@ -25,6 +25,8 @@ internal sealed class AppSettings
     public bool HumanizeOvershoot { get; set; }
     /// <summary>程序树滚动时把外层作用域钉在顶部（2026-11-23，默认开）。</summary>
     public bool StickyScope { get; set; } = true;
+    /// <summary>右栏活动占属性 + 活动的比例（拖过中间那条缝以后记下，2026-11-25）；0 = 没拖过，按窗口宽度给默认高度。</summary>
+    public double ActivityRatio { get; set; }
     /// <summary>用户改过的快捷键：动作 → 组合键文字（"" = 清空）。没改的用 Keymap 里的默认值（2026-11-23）。</summary>
     public Dictionary<string, string> Shortcuts { get; set; } = new();
 

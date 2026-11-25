@@ -84,7 +84,7 @@ public sealed partial class MainWindow : Window
     private readonly List<UIElement> _compactHide = new();
     private readonly UniformGrid _tiles = new() { Columns = 4, Margin = new Thickness(0, 0, -6, 2) };
     private ColumnDefinition _leftCol = null!, _rightCol = null!, _shelfCol = null!;
-    private RowDefinition _headerRow = null!, _canvasRow = null!, _activityRow = null!;
+    private RowDefinition _headerRow = null!, _canvasRow = null!, _activityRow = null!, _propsRow = null!;
     private string _density = "";
     private StatusPill? _pill;
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -197,7 +197,7 @@ public sealed partial class MainWindow : Window
         _leftCol.Width = new GridLength(c ? 264 : w ? 340 : 304);
         _rightCol.Width = new GridLength(c ? 292 : w ? 430 : 340);
         _shelfCol.Width = new GridLength(c ? 150 : w ? 230 : 196);
-        _activityRow.Height = new GridLength(c ? 168 : w ? 320 : 222);
+        ApplyActivityHeight(c ? 168 : w ? 320 : 222);
         _headerRow.Height = new GridLength(c ? 56 : 64);
         _canvasRow.Height = new GridLength(c ? 1 : 1.2, GridUnitType.Star);
         _tiles.Columns = c ? 7 : 4;
@@ -458,18 +458,35 @@ public sealed partial class MainWindow : Window
         var head3 = StepHead("3", "step3", _resCount);
         AutomationProperties.SetAutomationId(_resources, "resources");
         L.Reg(_resources, AutomationProperties.NameProperty, "step3");
-        _resources.ItemsPanel = new ItemsPanelTemplate(new FrameworkElementFactory(typeof(UniformGrid)) { });
-        _resources.ItemsPanel.VisualTree.SetValue(UniformGrid.ColumnsProperty, 2);
+        // 2026-11-25：按种类分组（组头可以折起来），两列卡片换成自己算宽度的 WrapPanel，组头占一整行
+        _resources.ItemsPanel = new ItemsPanelTemplate(new FrameworkElementFactory(typeof(WrapPanel)) { });
         _resources.ItemsPanel.VisualTree.SetValue(VerticalAlignmentProperty, VerticalAlignment.Top);
         ScrollViewer.SetHorizontalScrollBarVisibility(_resources, ScrollBarVisibility.Disabled);
         _resources.Margin = new Thickness(0, 0, -8, 0);
+        _resources.SizeChanged += (_, _) => SizeResourceItems();
         _resources.SelectionChanged += (_, _) =>
         {
             if (_resources.SelectedItem is ListBoxItem { Tag: ResourceRef r }) { _selected = r; ShowProps(); }
         };
+        // 筛选：一排种类小签 + 按名字找
+        AutomationProperties.SetAutomationId(_resFilters, "resFilters");
+        _resSearch.ToolTip = L.T("resSearchTip");
+        AutomationProperties.SetAutomationId(_resSearch, "resSearch");
+        AutomationProperties.SetName(_resSearch, L.T("resSearchTip"));
+        _resSearch.TextChanged += (_, _) => RebuildResources();
+        var find = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+        var findLabel = new TextBlock { Text = L.T("resSearch"), Foreground = R("Text3"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+        DockPanel.SetDock(findLabel, Dock.Left);
+        find.Children.Add(findLabel);
+        find.Children.Add(_resSearch);
+        var tools3 = new StackPanel { Margin = new Thickness(0, 0, 0, 4) };
+        tools3.Children.Add(find);
+        tools3.Children.Add(_resFilters);
         var s3 = new DockPanel();
         DockPanel.SetDock(head3, Dock.Top);
         s3.Children.Add(head3);
+        DockPanel.SetDock(tools3, Dock.Top);
+        s3.Children.Add(tools3);
         s3.Children.Add(_resources);
         var c3 = TightPad(Card(s3), new Thickness(16, 14, 16, 8), new Thickness(12, 10, 12, 6));
         Grid.SetRow(c3, 4);
@@ -653,9 +670,22 @@ public sealed partial class MainWindow : Window
     private UIElement BuildRight()
     {
         var g = new Grid();
-        g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        g.RowDefinitions.Add(_propsRow = new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 120 });
         g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(12) });
-        g.RowDefinitions.Add(_activityRow = new RowDefinition { Height = new GridLength(222) });
+        g.RowDefinitions.Add(_activityRow = new RowDefinition { Height = new GridLength(222), MinHeight = 90 });
+        // 2026-11-25：属性和活动中间的缝可以拖，拖过的比例记进设置；窗口变大变小时按比例缩放
+        var split = new GridSplitter { Height = 12, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent, Cursor = Cursors.SizeNS, ResizeBehavior = GridResizeBehavior.PreviousAndNext };
+        AutomationProperties.SetAutomationId(split, "rightSplitter");
+        split.DragCompleted += (_, _) =>
+        {
+            double a = _activityRow.ActualHeight, t = _propsRow.ActualHeight + a;
+            if (t <= 0) return;
+            AppSettings.Current.ActivityRatio = Math.Round(a / t, 3);
+            AppSettings.Save();
+            ApplyActivityHeight(0);
+        };
+        Grid.SetRow(split, 1);
+        g.Children.Add(split);
 
         var propsDock = new DockPanel();
         var ph = Txt("props", 15, "Ink", FontWeights.SemiBold);
@@ -684,13 +714,8 @@ public sealed partial class MainWindow : Window
         _log.ItemContainerStyle = S("LogLine");
         _log.Margin = new Thickness(12, 0, 8, 10);
         _log.FontFamily = (FontFamily)_theme["UiFont"];
-        _log.ItemTemplate = null;
         ScrollViewer.SetHorizontalScrollBarVisibility(_log, ScrollBarVisibility.Disabled);
-        // 日志项保持纯字符串（ui.ps1 按 Name 读），只让它们换行显示
-        var tf = new FrameworkElementFactory(typeof(TextBlock));
-        tf.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding());
-        tf.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
-        _log.ItemTemplate = new DataTemplate { VisualTree = tf };
+        // 2026-11-25：每条是一块积木色小块 + 一句话（AddEntry 建好的 ListBoxItem），ui.ps1 照样按文字读
         logDock.Children.Add(_log);
         var act = Card(logDock);
         Grid.SetRow(act, 2);
@@ -772,27 +797,95 @@ public sealed partial class MainWindow : Window
         UpdateTitle();
     }
 
+    // ③ 资源的分组和筛选（2026-11-25）：只在这次编辑期间记住，不存盘
+    private readonly WrapPanel _resFilters = new();
+    private readonly TextBox _resSearch = new() { FontSize = 12 };
+    private readonly HashSet<string> _resFolded = new();
+    private string _resKind = "";
+    private static readonly string[] ResKinds = { "region", "point", "template", "color", "grid" };
+
     private void RebuildResources()
     {
         _resources.Items.Clear();
-        void Add(string kind, string name, string text, Brush fg, ImageSource? thumb, Brush? swatch = null)
+        var all = new List<(string Kind, string Name, string Label, string Text, Brush Fg, Func<ImageSource?> Thumb, Brush? Swatch)>();
+        foreach (var (n, r) in _ed.Program.Regions) all.Add(("region", n, r.Label, $"热区 · {n}　({r.X},{r.Y}) {r.W}×{r.H}", Ui.SenseFg, () => Crop(r.X, r.Y, r.W, r.H), null));
+        foreach (var (n, p) in _ed.Program.Points) all.Add(("point", n, p.Label, $"定点 · {n}　({p.X},{p.Y})", Ui.FlowFg, () => Crop(p.X - 60, p.Y - 40, 120, 80), null));
+        foreach (var (n, t) in _ed.Program.Templates) all.Add(("template", n, t.Label, $"模板 · {n}　{t.File}", Ui.ActFg, () => LoadImage(Path.Combine(_ed.Dir, t.File)), null));
+        foreach (var (n, c) in _ed.Program.Colors) all.Add(("color", n, c.Label, $"颜色 · {n}　H{c.Lower[0]}–{c.Upper[0]}", R("Text2"), () => null, Swatch(c)));
+        foreach (var (n, g) in _ed.Program.Grids) all.Add(("grid", n, g.Label, $"网格 · {n}　{g.Cols}×{g.Rows}，每格 {g.W}×{g.H}", Ui.FlowFg, () => Crop(g.X, g.Y, g.Cols * g.W + (g.Cols - 1) * g.GapX, g.Rows * g.H + (g.Rows - 1) * g.GapY), null));
+        string q = _resSearch.Text.Trim();
+        // 按名字或标签找（画布上显示的是标签，卡片上是名字）
+        bool Match((string Kind, string Name, string Label, string Text, Brush Fg, Func<ImageSource?> Thumb, Brush? Swatch) x) =>
+            q.Length == 0 || x.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || x.Label.Contains(q, StringComparison.OrdinalIgnoreCase);
+
+        // 筛选小签：全部 + 每种（带个数，按名字找时是找到的个数）
+        _resFilters.Children.Clear();
+        void Chip(string kind, string label, int n)
         {
-            var visual = new Border { Height = 54, Background = swatch ?? Ui.Hex("#263240") };
-            if (thumb != null) visual.Child = new Image { Source = thumb, Stretch = Stretch.UniformToFill, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            var kindText = new TextBlock { Text = L.T("k_" + kind), FontSize = 11, Foreground = fg, Margin = new Thickness(8, 4, 8, 0) };
-            var nameText = new TextBlock { Text = name, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(8, 0, 8, 0), TextTrimming = TextTrimming.CharacterEllipsis, Foreground = R("Ink") };
-            var sp = new StackPanel { Children = { visual, kindText, nameText } };
-            var item = new ListBoxItem { Content = sp, Tag = new ResourceRef(kind, name), Style = S("ResourceCard"), ToolTip = text };
-            AutomationProperties.SetName(item, text);   // ui.ps1 的 selectres 按这个全名匹配（格式和改版前一样）
-            _resources.Items.Add(item);
+            bool on = _resKind == kind;
+            var b = Ui.Btn($"{label} {n}", () => { _resKind = kind; RebuildResources(); }, "resFilter_" + (kind == "" ? "all" : kind), on ? R("Ink") : Brushes.Transparent, on ? R("OnInk") : R("Text2"));
+            b.MinWidth = 0;
+            b.FontSize = 11.5;
+            b.Padding = new Thickness(8, 1, 8, 2);
+            b.Margin = new Thickness(0, 0, 5, 5);
+            if (!on) b.BorderBrush = R("Stroke");
+            _resFilters.Children.Add(b);
         }
-        foreach (var (n, r) in _ed.Program.Regions) Add("region", n, $"热区 · {n}　({r.X},{r.Y}) {r.W}×{r.H}", Ui.SenseFg, Crop(r.X, r.Y, r.W, r.H));
-        foreach (var (n, p) in _ed.Program.Points) Add("point", n, $"定点 · {n}　({p.X},{p.Y})", Ui.FlowFg, Crop(p.X - 60, p.Y - 40, 120, 80));
-        foreach (var (n, t) in _ed.Program.Templates) Add("template", n, $"模板 · {n}　{t.File}", Ui.ActFg, LoadImage(Path.Combine(_ed.Dir, t.File)));
-        foreach (var (n, c) in _ed.Program.Colors) Add("color", n, $"颜色 · {n}　H{c.Lower[0]}–{c.Upper[0]}", R("Text2"), null, Swatch(c));
-        foreach (var (n, g) in _ed.Program.Grids) Add("grid", n, $"网格 · {n}　{g.Cols}×{g.Rows}，每格 {g.W}×{g.H}", Ui.FlowFg, Crop(g.X, g.Y, g.Cols * g.W + (g.Cols - 1) * g.GapX, g.Rows * g.H + (g.Rows - 1) * g.GapY));
-        _resCount.Text = _resources.Items.Count.ToString(CultureInfo.InvariantCulture);
+        Chip("", L.T("resAll"), all.Count(Match));
+        foreach (var k in ResKinds) if (all.Any(x => x.Kind == k)) Chip(k, L.T("k_" + k), all.Count(x => x.Kind == k && Match(x)));
+
+        foreach (var kind in ResKinds)
+        {
+            if (_resKind != "" && _resKind != kind) continue;
+            var items = all.Where(x => x.Kind == kind && Match(x)).ToList();
+            if (items.Count == 0) continue;
+            bool folded = _resFolded.Contains(kind) && q.Length == 0;   // 正在找的时候组都打开
+            // 组头：小三角 + 种类 + 个数，点一下折起来 / 打开；不能被选中
+            var tri = new System.Windows.Shapes.Path { Data = Geometry.Parse(folded ? "M1,0 L6,4.5 L1,9 Z" : "M0,1 L9,1 L4.5,6 Z"), Fill = R("Text2"), Width = 9, Height = 9, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+            var head = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 4, 0, 4) };
+            head.Children.Add(tri);
+            head.Children.Add(new TextBlock { Text = L.T("k_" + kind), FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = items[0].Fg });
+            head.Children.Add(new TextBlock { Text = "  " + items.Count, FontSize = 12, Foreground = R("Text3") });
+            var hi = new ListBoxItem { Content = head, Focusable = false, Cursor = Cursors.Hand, Tag = "group:" + kind, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0) };
+            AutomationProperties.SetAutomationId(hi, "resGroup_" + kind);
+            AutomationProperties.SetName(hi, $"{L.T("k_" + kind)} {items.Count}");
+            hi.PreviewMouseLeftButtonDown += (_, e) =>
+            {
+                e.Handled = true;
+                if (!_resFolded.Remove(kind)) _resFolded.Add(kind);
+                RebuildResources();
+            };
+            _resources.Items.Add(hi);
+            if (folded) continue;
+            foreach (var x in items)
+            {
+                var visual = new Border { Height = 54, Background = x.Swatch ?? Ui.Hex("#263240") };
+                if (x.Thumb() is { } thumb) visual.Child = new Image { Source = thumb, Stretch = Stretch.UniformToFill, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                var kindText = new TextBlock { Text = L.T("k_" + kind), FontSize = 11, Foreground = x.Fg, Margin = new Thickness(8, 4, 8, 0) };
+                var nameText = new TextBlock { Text = x.Name, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(8, 0, 8, 0), TextTrimming = TextTrimming.CharacterEllipsis, Foreground = R("Ink") };
+                var sp = new StackPanel { Children = { visual, kindText, nameText } };
+                var item = new ListBoxItem { Content = sp, Tag = new ResourceRef(kind, x.Name), Style = S("ResourceCard"), ToolTip = x.Text };
+                AutomationProperties.SetName(item, x.Text);   // ui.ps1 的 selectres 按这个全名匹配（格式和改版前一样）
+                _resources.Items.Add(item);
+            }
+        }
+        _resCount.Text = all.Count.ToString(CultureInfo.InvariantCulture);
+        SizeResourceItems();
     }
+
+    /// <summary>卡片两列、组头一整行：按资源列表的可用宽度算（WrapPanel 不会自己均分）。</summary>
+    private void SizeResourceItems()
+    {
+        var sv = FindChild<ScrollViewer>(_resources);
+        // 卡片多到出滚动条时可用宽度会变窄，ListBox 自己的大小不变：盯着滚动区的宽度重算
+        if (sv != null && !_resSvHooked) { _resSvHooked = true; sv.ScrollChanged += (_, e) => { if (e.ViewportWidthChange != 0) SizeResourceItems(); }; }
+        double w = sv is { ViewportWidth: > 0 } ? sv.ViewportWidth : _resources.ActualWidth;
+        if (w <= 0) return;
+        foreach (var o in _resources.Items)
+            if (o is ListBoxItem it) it.Width = it.Tag is ResourceRef ? Math.Max(60, Math.Floor(w / 2) - 9) : Math.Max(60, w - 9);   // 卡片右边距 8，多留 1 防取整换行
+    }
+
+    private bool _resSvHooked;
 
     /// <summary>资源缩略图：从冻结帧上裁（基准坐标 × K = 帧像素）。没截帧时返回 null，卡片显示纯色底。</summary>
     private ImageSource? Crop(int x, int y, int w, int h)
@@ -928,13 +1021,18 @@ public sealed partial class MainWindow : Window
         var dp = new DockPanel();
         DockPanel.SetDock(toggle, Dock.Left);
         dp.Children.Add(toggle);
+        // 积木的字排在最前（ui.ps1 按第一段字认积木），折着时「… 里面 N 块」跟在后面
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.Children.Add(text);
         if (collapsed && inside > 0)
         {
             var more = new TextBlock { Text = string.Format(L.T("foldInside"), inside), Foreground = Brushes.White, Opacity = 0.85, FontSize = 12, Margin = new Thickness(8, 1, 0, 0), VerticalAlignment = VerticalAlignment.Top };
-            DockPanel.SetDock(more, Dock.Right);
-            dp.Children.Add(more);
+            Grid.SetColumn(more, 1);
+            g.Children.Add(more);
         }
-        dp.Children.Add(text);
+        dp.Children.Add(g);
         return dp;
     }
 
@@ -1930,6 +2028,10 @@ public sealed partial class MainWindow : Window
 
     private void SelectResource(string kind, string name)
     {
+        // 新建、在画布上点到的资源：它那一组折着、被筛掉或者搜不到时先放开，保证能选中、看得见
+        _resFolded.Remove(kind);
+        if (_resKind != "" && _resKind != kind) _resKind = "";
+        if (_resSearch.Text.Length > 0 && !name.Contains(_resSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase)) _resSearch.Text = "";
         RefreshAll();
         foreach (var o in _resources.Items)
             if (o is ListBoxItem { Tag: ResourceRef r } it && r.Kind == kind && r.Name == name) { _resources.SelectedItem = it; it.BringIntoView(); }
@@ -2011,12 +2113,75 @@ public sealed partial class MainWindow : Window
         _tester.Dispose();
     }
 
+    /// <summary>
+    /// 活动里加一条（2026-11-25 改成积木样式）。运行日志的一行（JSON）翻成人话，翻不了的（帧、逐次判断）不显示；
+    /// 编辑器自己的话按开头分：⚠ 提醒、■ 出错，「运行结束」算流程，「试一下 / 试读」算识别，其余灰色。
+    /// </summary>
     private void Log(string s)
     {
+        if (s.StartsWith('{'))
+        {
+            if (ActivityText.FromBotLine(s) is { } ev) AddEntry(ev);
+            return;
+        }
         foreach (var line in s.Split('\n'))
-            _log.Items.Add($"{DateTime.Now:HH:mm:ss}  {line}");
+        {
+            static string After(string x) => x.Split('：', 2) is { Length: 2 } parts ? parts[1] : x;
+            var e = line switch
+            {
+                _ when line.StartsWith('⚠') => new ActivityText.Entry("warn", L.T("logWarn"), line.TrimStart('⚠', ' ')),
+                _ when line.StartsWith('■') => new ActivityText.Entry("bad", L.T("logStop"), line.TrimStart('■', ' ')),
+                _ when line.StartsWith("运行结束", StringComparison.Ordinal) => new ActivityText.Entry("flow", L.T("logRunEnd"), After(line)),
+                _ when line.StartsWith("试一下", StringComparison.Ordinal) || line.StartsWith("试读", StringComparison.Ordinal) => new ActivityText.Entry("sense", L.T("logTry"), After(line)),
+                _ => new ActivityText.Entry("sys", L.T("logInfo"), line)
+            };
+            AddEntry(e);
+        }
+    }
+
+    private void AddEntry(ActivityText.Entry e)
+    {
+        string time = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        Brush color = e.Kind switch { "flow" => Ui.FlowFg, "sense" => Ui.SenseFg, "act" => Ui.ActFg, "warn" => R("Warn"), "bad" => R("Bad"), _ => R("Text3") };
+        // 小积木：上面一个小凸起，下面圆角块，和积木架的颜色一样
+        var chip = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 8, 0) };
+        chip.Children.Add(new Border { Width = 12, Height = 4, Background = color, CornerRadius = new CornerRadius(2, 2, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(7, 0, 0, 0) });
+        chip.Children.Add(new Border
+        {
+            Background = color, CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 2, 8, 3),
+            Child = new TextBlock { Text = e.Block, Foreground = Brushes.White, FontSize = 11.5, FontWeight = FontWeights.SemiBold }
+        });
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 3, 0, 0) };
+        text.Children.Add(new TextBlock { Text = e.Text, TextWrapping = TextWrapping.Wrap, Foreground = e.Kind == "bad" ? R("Bad") : R("Ink"), FontSize = 12.5 });
+        if (e.Sub != null) text.Children.Add(new TextBlock { Text = e.Sub, TextWrapping = TextWrapping.Wrap, Foreground = R("Text3"), FontSize = 11.5 });
+        var row = new DockPanel();
+        DockPanel.SetDock(chip, Dock.Left);
+        row.Children.Add(chip);
+        row.Children.Add(text);
+        var all = new StackPanel();
+        all.Children.Add(new TextBlock { Text = time, FontSize = 10.5, Foreground = R("Text3"), FontFamily = new FontFamily("Consolas") });
+        all.Children.Add(row);
+        var item = new ListBoxItem { Content = all };
+        AutomationProperties.SetName(item, $"{time}  {e.Plain}");
+        _log.Items.Add(item);
         while (_log.Items.Count > 400) _log.Items.RemoveAt(0);
-        _log.ScrollIntoView(_log.Items[^1]);
+        _log.ScrollIntoView(item);
+    }
+
+    /// <summary>右栏活动的高度：用户拖过（设置里有比例）就按比例分，窗口变大变小跟着缩放；没拖过按窗口宽度档位给的像素高。</summary>
+    private void ApplyActivityHeight(double densityPx)
+    {
+        double r = AppSettings.Current.ActivityRatio;
+        if (r is > 0.05 and < 0.95)
+        {
+            _propsRow.Height = new GridLength(1 - r, GridUnitType.Star);
+            _activityRow.Height = new GridLength(r, GridUnitType.Star);
+        }
+        else if (densityPx > 0)
+        {
+            _propsRow.Height = new GridLength(1, GridUnitType.Star);
+            _activityRow.Height = new GridLength(densityPx);
+        }
     }
 
     private static class Native

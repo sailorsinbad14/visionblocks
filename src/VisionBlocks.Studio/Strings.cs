@@ -56,6 +56,8 @@ internal static class L
         ["scopeStart"] = ("最前面", "at the start"), ["scopeAfter"] = ("「{0}」后面", "after “{0}”"), ["scopeNth"] = ("第 {0} 块（这一层共 {1} 块）", "block {0} of {1} at this level"),
         ["scopeHint"] = ("选中一块积木，这里显示它在哪个作用域里", "Select a block to see which scope it is in"), ["scopeNoSelf"] = ("不能放进它自己里面", "can't go inside itself"),
         ["stickyMore"] = ("…外面还有 {0} 层", "…{0} more levels outside"),
+        ["resAll"] = ("全部", "All"), ["resSearch"] = ("找", "Find"), ["resSearchTip"] = ("按名字找资源", "Find resources by name"),
+        ["logWarn"] = ("注意", "Note"), ["logStop"] = ("停止", "Stop"), ["logRunEnd"] = ("运行结束", "Run ended"), ["logTry"] = ("试一下", "Try"), ["logInfo"] = ("提示", "Info"),
         ["foldClose"] = ("折叠", "Fold"), ["foldOpen"] = ("展开", "Unfold"), ["foldAll"] = ("全部折叠", "Fold all"), ["unfoldAll"] = ("全部展开", "Unfold all"),
         ["foldInside"] = ("… 里面 {0} 块", "… {0} blocks inside"), ["foldNothing"] = ("先选中一块「重复 / 如果 / 对每一格」这类容器积木", "Select a container block (repeat / if / for each cell) first"),
         ["scopeFolded"] = ("已折叠，里面 {0} 块", "folded, {0} blocks inside"),

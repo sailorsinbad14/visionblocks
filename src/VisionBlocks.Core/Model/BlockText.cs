@@ -8,7 +8,7 @@ public static class BlockText
     public static Category CategoryOf(Block b) => b switch
     {
         RepeatUntilBlock or RepeatBlock or IfBlock or WaitUntilBlock or StopBlock or ForEachCellBlock or UntilNoNewRowsBlock => Category.Flow,
-        ReadTextBlock or SaveImageBlock => Category.Sense,
+        ReadTextBlock or SaveImageBlock or ClassifyBlock => Category.Sense,
         _ => Category.Action
     };
 
@@ -52,6 +52,7 @@ public static class BlockText
         DragBlock d => $"在「{R(p, d.Region)}」按住拖动，{(d.DistancePx > 0 ? "向下翻" : "向上翻")} {Math.Abs(d.DistancePx)} px（边拖边量）",
         ReadTextBlock r => $"读「{R(p, r.Region)}」的文字 → 字段「{r.Field}」" + (r.NumbersOnly ? "（只要数字）" : ""),
         SaveImageBlock s => $"截「{R(p, s.Region)}」存图 → 字段「{s.Field}」",
+        ClassifyBlock c => $"在「{R(p, c.Region)}」认图案（{(c.Templates.Count > 0 ? string.Join(" / ", c.Templates.Select(t => LT(p, t))) : "还没选模板")}）→ 字段「{c.Field}」",
         RecordRowBlock rr => "记录一行" + (rr.DedupeBy.Count > 0 ? $"（按「{string.Join("+", rr.DedupeBy)}」去重）" : ""),
         _ => b.GetType().Name
     };

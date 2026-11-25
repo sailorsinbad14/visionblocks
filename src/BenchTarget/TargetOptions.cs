@@ -19,6 +19,7 @@ public sealed class TargetOptions
     public bool Showcase = false;        // 样张模式：固定摆出所有键帽和红血条，用来裁模板、取颜色
     public string Scene = "patrol";      // patrol = 巡逻小游戏；inventory = 背包（2026-11-20）
     public int OpenItem = -1;            // 背包：启动时直接打开第一个分类里第 N 个物品的详情（截样张用）
+    public int OpenCat = 0;              // 背包：--open-item 在第几个分类里数（2026-11-25，离线复现别的分类的物品用）
     public int ScrollStep = 0;           // 背包：滚轮一格滚多少基准像素；0 = 正好一行（对齐）
     // 背包的按住拖动（2026-11-23）：按下不放、竖着移过门槛就拖列表，没拖动的松开才算点击
     public double DragThreshold = 10;    // 门槛（基准像素）；0 = 关掉拖动，恢复「一按下就点开」的旧行为
@@ -54,6 +55,7 @@ public sealed class TargetOptions
                 case "--showcase": o.Showcase = true; break;
                 case "--scene": o.Scene = Next(); break;
                 case "--open-item": o.OpenItem = int.Parse(Next(), CultureInfo.InvariantCulture); break;
+                case "--open-cat": o.OpenCat = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--scroll-step": o.ScrollStep = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--drag-threshold": o.DragThreshold = double.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--drag-ratio": o.DragRatio = double.Parse(Next(), CultureInfo.InvariantCulture); break;

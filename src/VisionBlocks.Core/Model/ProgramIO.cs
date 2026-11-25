@@ -27,6 +27,17 @@ public static class ProgramIO
     public static void Save(VbProgram p, string path) =>
         File.WriteAllText(path, JsonSerializer.Serialize(p, Options), new UTF8Encoding(false));
 
+    /// <summary>「截图存图」写的字段（值是图片的相对路径）。编辑器的去重下拉框也用它把这些字段灰掉。</summary>
+    public static IEnumerable<string> ImageFields(IEnumerable<Block> blocks)
+    {
+        foreach (var b in blocks)
+        {
+            if (b is SaveImageBlock s && !string.IsNullOrWhiteSpace(s.Field)) yield return s.Field;
+            if (b is IContainerBlock c) foreach (var f in ImageFields(c.Body)) yield return f;
+            if (b is IfBlock ib) foreach (var f in ImageFields(ib.Else)) yield return f;
+        }
+    }
+
     /// <summary>检查积木引用的名字是否都存在，返回中文错误列表（空 = 没问题）。</summary>
     public static List<string> Validate(VbProgram p)
     {
@@ -112,6 +123,27 @@ public static class ProgramIO
                         if (!RegionOk(si.Region, inCell)) errs.Add($"{w}：{RegionErr(si.Region, inCell)}");
                         if (string.IsNullOrWhiteSpace(si.Field)) errs.Add($"{w}：没有填字段名");
                         break;
+                    case ClassifyBlock cl:
+                        if (!RegionOk(cl.Region, inCell)) errs.Add($"{w}：{RegionErr(cl.Region, inCell)}");
+                        if (string.IsNullOrWhiteSpace(cl.Field)) errs.Add($"{w}：没有填字段名");
+                        if (cl.Templates.Count == 0) errs.Add($"{w}：认图案还没选模板");
+                        foreach (var t in cl.Templates.Where(t => !p.Templates.ContainsKey(t))) errs.Add($"{w}：模板「{t}」不存在");
+                        if (cl.Threshold is < 0.3 or > 1.0) errs.Add($"{w}：门槛要在 0.3–1.0 之间");
+                        // 空值会被「记录一行」当成读空，悄悄走兜底
+                        if (string.IsNullOrWhiteSpace(cl.NoneText)) errs.Add($"{w}：「都不像时写」不能为空（空值会被当成读空）");
+                        break;
+                    case RecordRowBlock rr:
+                    {
+                        // 2026-11-25：截图字段的值是按行号起名的文件路径，每行都不一样，放进去重等于不去重；写错的字段名会被当成读空
+                        var images = new HashSet<string>(ImageFields(p.Program));
+                        var fields = Runtime.Recorder.FieldsOf(p);
+                        foreach (var f in rr.DedupeBy)
+                        {
+                            if (images.Contains(f)) errs.Add($"{w}：去重字段「{f}」是截图存下的图片，比的是文件名（每行都不一样），等于不去重；要按图片上的角标区分，用「认图案」");
+                            else if (!fields.Contains(f)) errs.Add($"{w}：去重字段「{f}」在程序里没有（没有「读文字」「认图案」写这个字段）");
+                        }
+                        break;
+                    }
                 }
             }
         }

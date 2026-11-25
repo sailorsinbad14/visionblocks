@@ -43,7 +43,7 @@ public static class KeymapSelfTest
         var def = Keymap.Effective(null);
         var dups = def.Where(kv => kv.Value != "").GroupBy(kv => kv.Value).Where(g => g.Count() > 1).Select(g => g.Key + "：" + string.Join("/", g.Select(x => x.Key))).ToList();
         Check("默认键没有重复", dups.Count == 0, dups.Count == 0 ? $"{def.Count(kv => kv.Value != "")} 个动作有默认键，共 {def.Count} 个动作" : string.Join("；", dups));
-        Check("积木架 19 块都能配键", Keymap.PaletteTypes.All(t => def.ContainsKey("pal:" + t)) && Keymap.PaletteTypes.Length == 19, $"{Keymap.PaletteTypes.Length} 块");
+        Check("积木架 20 块都能配键（2026-11-25 加了「认图案」）", Keymap.PaletteTypes.All(t => def.ContainsKey("pal:" + t)) && Keymap.PaletteTypes.Length == 20, $"{Keymap.PaletteTypes.Length} 块");
         Check("几个关键默认值", def["save"] == "Ctrl+S" && def["moveUp"] == "Alt+Up" && def["settings"] == "Ctrl+Comma" && def[Keymap.EStop] == "Ctrl+Alt+F12" && def[Keymap.Pause] == "Ctrl+Alt+F11" && def["toolRegion"] == "2",
             $"保存 {def["save"]}，上移 {def["moveUp"]}，设置 {def["settings"]}，急停 {def[Keymap.EStop]}");
         var ov = Keymap.Effective(new Dictionary<string, string> { ["save"] = "ctrl+shift+s", ["copy"] = "", [Keymap.EStop] = "", ["pal:click"] = "Ctrl+1", ["undo"] = "乱写" });

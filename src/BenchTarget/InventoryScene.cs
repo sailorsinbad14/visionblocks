@@ -83,7 +83,7 @@ public sealed class InventoryScene
             twins = opt.Twins, naturalEnd = _naturalEnd,
             items = Items.Select(it => new { cat = Categories[it.Cat], idx = it.Idx, name = it.Name, stock = it.Stock, prices = it.Prices, vols = it.Vols, shape = it.Shape, color = it.Color, badge = it.Badge, badgeColor = it.BadgeColor })
         });
-        if (opt.OpenItem >= 0) Open = InCategory(0).ElementAtOrDefault(opt.OpenItem);
+        if (opt.OpenItem >= 0) Open = InCategory(opt.OpenCat).ElementAtOrDefault(opt.OpenItem);
     }
 
     /// <summary>

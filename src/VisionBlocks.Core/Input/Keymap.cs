@@ -87,7 +87,7 @@ public static class Keymap
     public static readonly string[] PaletteTypes =
     {
         "repeatUntil", "repeat", "if", "waitUntil", "stop", "forEachCell", "untilNoNewRows",
-        "cond:image", "cond:color", "cond:text", "readText", "saveImage", "recordRow",
+        "cond:image", "cond:color", "cond:text", "readText", "saveImage", "classify", "recordRow",
         "click", "key", "typeText", "wait", "wheel", "drag",
     };
 

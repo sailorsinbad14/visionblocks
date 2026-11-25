@@ -11,6 +11,7 @@ studio-settings.json
 programs/*
 !programs/t1/
 !programs/inv1/
+!programs/inv-twins/
 
 # 只在开发机上用的启动脚本（仓库里用 start-editor.cmd）/ local launchers
 start-old-editor.cmd

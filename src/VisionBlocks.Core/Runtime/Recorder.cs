@@ -11,7 +11,8 @@ public sealed class Recorder : IDisposable
 {
     private readonly List<string> _columns;
     private readonly Dictionary<string, string> _values = new();
-    private readonly HashSet<string> _seen = new();
+    /// <summary>去重键 → 第一次记下它的行号（跳过时告诉用户和第几行一样）。</summary>
+    private readonly Dictionary<string, int> _seen = new();
     private readonly Dictionary<string, byte[]> _thumbs = new();
     private readonly List<(string Text, byte[][] Thumbs, int Row)> _blankKeyed = new();
     /// <summary>这一行还没记下时存的图（相对路径）。这一行被去重跳过时要删掉，否则会留下表里不引用的图（2026-11-22 实测：最后一个重复物品留下一张 047）。</summary>
@@ -34,7 +35,7 @@ public sealed class Recorder : IDisposable
         _w.Flush();
     }
 
-    /// <summary>按出现顺序列出程序里所有「读文字」「截图存图」用到的字段名。</summary>
+    /// <summary>按出现顺序列出程序里所有「读文字」「截图存图」「认图案」用到的字段名。</summary>
     public static List<string> FieldsOf(VbProgram p)
     {
         var list = new List<string>();
@@ -42,7 +43,7 @@ public sealed class Recorder : IDisposable
         {
             foreach (var b in blocks)
             {
-                string? f = b switch { ReadTextBlock r => r.Field, SaveImageBlock s => s.Field, _ => null };
+                string? f = b switch { ReadTextBlock r => r.Field, SaveImageBlock s => s.Field, ClassifyBlock cl => cl.Field, _ => null };
                 if (!string.IsNullOrWhiteSpace(f) && !list.Contains(f)) list.Add(f);
                 if (b is IContainerBlock c) Walk(c.Body);
                 if (b is IfBlock ib) Walk(ib.Else);
@@ -61,29 +62,39 @@ public sealed class Recorder : IDisposable
     public int NextRowNo => Rows + 1;
 
     /// <summary>
-    /// 写一行；dedupeBy 里的字段组合写过的话跳过，返回 false。
-    /// 去重字段全部读空时（2026-11-20 实测：名称框贴字太紧，7 个物品名读空，后 6 个被当成重复悄悄丢了），
-    /// 空值不能当键，改用「其余文字字段 + 存的图片缩略图」认物品：都一样才算重复，否则照记一行。
+    /// 写一行；dedupeBy 里的字段组合写过的话跳过，返回 false。key 是给人看的说明（写进日志和运行信息）。
+    /// 去重字段读空时（2026-11-20 实测：名称框贴字太紧，7 个物品名读空，后 6 个被当成重复悄悄丢了），
+    /// 空值不能当键，改用「没读空的文字字段 + 存的图片缩略图」认物品：都一样才算重复，否则照记一行。
     /// 只比图片不够——靶子 46 个物品只有 27 种图片。没有图片可比时照记，宁可多一行也不丢。
+    /// 2026-11-25 起任何一个去重字段读空就走这条路（以前要全部读空）：按「名称，有效期」去重时有效期总有值，
+    /// 名称读空、角标一样的几件会拼成同一个键被并掉。没读空的去重字段（比如有效期）留在比较里。
     /// </summary>
     public bool Record(IReadOnlyList<string> dedupeBy, out string key)
     {
-        key = string.Join("|", dedupeBy.Select(f => _values.GetValueOrDefault(f, "")));
-        if (dedupeBy.Count > 0 && dedupeBy.All(f => string.IsNullOrWhiteSpace(_values.GetValueOrDefault(f, ""))))
+        string V(string f) => _values.GetValueOrDefault(f, "");
+        key = string.Join("|", dedupeBy.Select(V));
+        var blanks = dedupeBy.Where(f => string.IsNullOrWhiteSpace(V(f))).ToList();
+        if (blanks.Count > 0)
         {
             EmptyKeys++;
-            string text = string.Join("|", _columns.Where(c => !dedupeBy.Contains(c) && !_thumbs.ContainsKey(c)).Select(c => _values.GetValueOrDefault(c, "")));
+            string which = string.Join("、", blanks);
+            string text = string.Join("|", _columns.Where(c => !_thumbs.ContainsKey(c) && !blanks.Contains(c)).Select(c => c + "=" + V(c)));
             byte[][] thumbs = _columns.Where(_thumbs.ContainsKey).Select(c => _thumbs[c]).ToArray();
-            if (thumbs.Length == 0) key = "（去重字段读空，没有图片可比，照记）";
+            if (thumbs.Length == 0) key = $"（{which}读空，没有图片可比，照记）";
             else
             {
                 var same = _blankKeyed.FirstOrDefault(b => b.Text == text && b.Thumbs.Length == thumbs.Length && b.Thumbs.Zip(thumbs).All(p => Similar(p.First, p.Second)));
-                if (same.Thumbs != null) { key = $"（去重字段读空）图片和其他字段同第 {same.Row} 行"; Duplicates++; DropPendingImages(); return false; }
+                if (same.Thumbs != null) { key = $"（{which}读空）图片和其他字段同第 {same.Row} 行"; Duplicates++; DropPendingImages(); return false; }
                 _blankKeyed.Add((text, thumbs, Rows + 1));
-                key = "（去重字段读空，按图片和其他字段记为新物品）";
+                key = $"（{which}读空，按图片和其他字段记为新物品）";
             }
         }
-        else if (dedupeBy.Count > 0 && !_seen.Add(key)) { Duplicates++; DropPendingImages(); return false; }
+        else if (dedupeBy.Count > 0 && _seen.TryGetValue(key, out int first))
+        {
+            key = $"{string.Join("、", dedupeBy)}都和第 {first} 行一样（{string.Join(" · ", dedupeBy.Select(V))}）";
+            Duplicates++; DropPendingImages(); return false;
+        }
+        else if (dedupeBy.Count > 0) _seen[key] = Rows + 1;
         Rows++;
         _w.WriteLine(string.Join(",", new[] { Rows.ToString(System.Globalization.CultureInfo.InvariantCulture) }
             .Concat(_columns.Select(c => _values.GetValueOrDefault(c, ""))).Select(Csv)));

@@ -115,6 +115,8 @@ internal static class L
         ["点击"] = "Click", ["输入文字"] = "Type text", ["停止"] = "Stop", ["对每一格"] = "For each cell", ["重复直到没有新记录"] = "Repeat until no new rows",
         ["滚轮"] = "Wheel", ["拖动"] = "Drag", ["在哪个热区拖"] = "Drag in region", ["距离 px（正数向下翻）"] = "Distance px (positive = page down)",
         ["速度 px/秒"] = "Speed px/s", ["松手前停顿 ms"] = "Pause before release (ms)", ["读文字"] = "Read text", ["截图存图"] = "Save image", ["记录一行"] = "Record row",
+        ["认图案"] = "Match pattern", ["比哪些模板"] = "Templates to compare", ["门槛"] = "Threshold", ["都不像时写"] = "Value when none match",
+        ["试一下（在冻结帧上）"] = "Try it (on the frozen frame)",
         ["看到图像"] = "Sees image", ["颜色占比"] = "Color ratio", ["文字包含"] = "Text contains",
         ["直到这个条件成立就结束循环"] = "End the loop once this is true", ["条件"] = "Condition", ["等到这个条件成立"] = "Wait until this is true",
         ["点完等到这个条件成立"] = "After clicking, wait until",
@@ -132,7 +134,7 @@ internal static class L
     {
         "repeatUntil" => "重复直到…", "repeat" => "重复 N 次", "if" => "如果…", "waitUntil" => "等到…", "stop" => "停止",
         "forEachCell" => "对每一格", "untilNoNewRows" => "重复直到没有新记录", "cond:image" => "看到图像", "cond:color" => "颜色占比", "cond:text" => "文字包含",
-        "readText" => "读文字", "saveImage" => "截图存图", "recordRow" => "记录一行", "click" => "点击", "key" => "按键", "typeText" => "输入文字",
+        "readText" => "读文字", "saveImage" => "截图存图", "classify" => "认图案", "recordRow" => "记录一行", "click" => "点击", "key" => "按键", "typeText" => "输入文字",
         "wait" => "等待", "wheel" => "滚轮", "drag" => "拖动", _ => type
     };
 

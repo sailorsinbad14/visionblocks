@@ -111,7 +111,10 @@ internal sealed class StudioRun
         }
         string summary = $"运行结束：{result}，用时 {sw.Elapsed.TotalSeconds:0.0}s；按键 {runner.Keys}，点击 {runner.Clicks}，拦截 {guard.Blocked}，点后确认失败 {runner.ConfirmFails}，等待超时 {runner.WaitTimeouts}"
             + (Recorder.FieldsOf(ed.Program).Count > 0 ? $"；记录 {runner.RowsRecorded} 行，重复跳过 {runner.Duplicates} 次" : "")
-            + (runner.EmptyKeys > 0 ? $"；去重字段读空 {runner.EmptyKeys} 次（改按图片和其他字段区分，名称框可能太紧）" : "");
+            + (runner.EmptyKeys > 0 ? $"；去重字段读空 {runner.EmptyKeys} 次（改按图片和其他字段区分，名称框可能太紧）" : "")
+            + (runner.Rereads > 0 ? $"；读空后放大再读 {runner.Rereads} 次，读出字 {runner.RereadHits} 次" : "")
+            + (runner.Classifies > 0 ? $"；认图案 {runner.Classifies} 次" + (runner.PatternClose + runner.PatternMidway > 0
+                ? $"（分不太开 {runner.PatternClose} 次、有点像但没过门槛 {runner.PatternMidway} 次：可能有还没裁模板的新图案，看活动里的提醒）" : "") : "");
         log.Dispose();
         try { File.Copy(botPath, Path.Combine(OutDir, $"bot-{DateTime.Now:HHmmss}.jsonl"), true); } catch { }
         return summary;

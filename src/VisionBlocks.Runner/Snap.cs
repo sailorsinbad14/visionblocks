@@ -51,8 +51,11 @@ internal static class Snap
     /// 打印得分和对比度，看真目标和干扰项之间有没有足够的间隔。
     /// </summary>
     /// <summary>vbrun ocr in.png x y w h [x y w h …]：离线识别截图里若干区域的文字（基准坐标），用来先试 OCR 准不准。</summary>
-    public static int Ocr(List<string> a)
+    /// <remarks>--scale N --pad P：换一种放大倍数、四周补边再读（2026-11-25，试「读空时再读一次」用）。</remarks>
+    public static int Ocr(List<string> a, Dictionary<string, string> o)
     {
+        double scale = double.Parse(Program.Opt(o, "scale", "0"), CultureInfo.InvariantCulture);
+        int pad = int.Parse(Program.Opt(o, "pad", "0"), CultureInfo.InvariantCulture);
         if (a.Count < 5 || (a.Count - 1) % 4 != 0) { Console.WriteLine("用法：vbrun ocr in.png x y w h [x y w h …]"); return 2; }
         using var img = Cv2.ImRead(a[0]);
         double k = Math.Min(1.0, img.Width / 1920.0);
@@ -61,7 +64,7 @@ internal static class Snap
         for (int i = 1; i < a.Count; i += 4)
         {
             var roi = new RegionDef { X = int.Parse(a[i]), Y = int.Parse(a[i + 1]), W = int.Parse(a[i + 2]), H = int.Parse(a[i + 3]) };
-            var (raw, norm, ms) = ocr.ReadAsync(n, roi).GetAwaiter().GetResult();
+            var (raw, norm, ms) = ocr.ReadAsync(n, roi, default, scale, pad).GetAwaiter().GetResult();
             Console.WriteLine($"  {roi}：「{norm}」（原文「{raw}」，{ms:0}ms）");
         }
         return 0;

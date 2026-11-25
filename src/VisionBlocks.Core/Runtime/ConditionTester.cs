@@ -40,14 +40,7 @@ public sealed class ConditionTester : IDisposable
             {
                 if (!p.Templates.TryGetValue(ic.Template, out var td)) return new Result(false, $"模板「{ic.Template}」不存在", null, null);
                 if (!TryRegion(ic.Region, out roi)) return new Result(false, $"热区「{ic.Region}」不存在", null, null);
-                string file = Path.Combine(dir, td.File);
-                if (!_cache.TryGetValue(ic.Template, out var e) || e.File != file)
-                {
-                    e.M?.Dispose();
-                    e = (file, TemplateMatcher.Load(file));
-                    _cache[ic.Template] = e;
-                }
-                var m = e.M.Match(f, roi);
+                var m = Matcher(ic.Template, Path.Combine(dir, td.File)).Match(f, roi);
                 hit = ConditionRules.ImageHit(m, ic);
                 box = m.Box;
                 detail = $"得分 {m.Score:0.000}（阈值 {ic.Threshold:0.00}），对比度 {m.Contrast:0.00}（下限 {ic.MinContrast:0.0}），用时 {m.Ms:0.0}ms";
@@ -77,11 +70,31 @@ public sealed class ConditionTester : IDisposable
         return new Result(hit, (hit ? "✓ 成立：" : "✗ 不成立：") + detail, roi, box);
     }
 
-    /// <summary>编辑器「读文字」积木的「试读」：和运行时一样的 OCR。</summary>
-    public Task<(string Raw, string Normalized, double Ms)> ReadAsync(NormFrame f, RegionDef roi)
+    private TemplateMatcher Matcher(string name, string file)
+    {
+        if (!_cache.TryGetValue(name, out var e) || e.File != file)
+        {
+            e.M?.Dispose();
+            e = (file, TemplateMatcher.Load(file));
+            _cache[name] = e;
+        }
+        return e.M;
+    }
+
+    /// <summary>编辑器「读文字」积木的「试读」：和运行时一样的 OCR（scale、padPx 给「读空时重读」用）。</summary>
+    public Task<(string Raw, string Normalized, double Ms)> ReadAsync(NormFrame f, RegionDef roi, double scale = 0, int padPx = 0)
     {
         _ocr ??= new OcrReader();
-        return _ocr.ReadAsync(f, roi);
+        return _ocr.ReadAsync(f, roi, default, scale, padPx);
+    }
+
+    /// <summary>编辑器「认图案」积木的「试一下」（2026-11-25）：和运行时同一套判定。</summary>
+    public PatternClassifier.Result Classify(VbProgram p, string dir, ClassifyBlock cl, NormFrame f, RegionDef roi)
+    {
+        var list = new List<(string, string, TemplateMatcher)>();
+        foreach (var n in cl.Templates)
+            if (p.Templates.TryGetValue(n, out var td)) list.Add((n, PatternClassifier.ValueOf(p, n), Matcher(n, Path.Combine(dir, td.File))));
+        return PatternClassifier.Classify(f, roi, list, cl.Threshold, cl.NoneText);
     }
 
     public void Dispose()

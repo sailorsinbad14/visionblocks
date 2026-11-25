@@ -314,6 +314,7 @@ public sealed class ProgramEditor
             "drag" => new DragBlock { Region = region, DistancePx = 240 },
             "readText" => new ReadTextBlock { Region = region, Field = "名称" },
             "saveImage" => new SaveImageBlock { Region = region, Field = "图片" },
+            "classify" => new ClassifyBlock { Region = region, Field = "有效期" },
             "recordRow" => new RecordRowBlock(),
             _ => throw new ArgumentException(type)
         };

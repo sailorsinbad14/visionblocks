@@ -27,6 +27,12 @@ public static class RecorderSelfTest
             if (withImage) p.Program.Add(new SaveImageBlock { Region = "c", Field = "图片" });
             return p;
         }
+        static VbProgram ProgBadge()
+        {
+            var p = Prog(true);
+            p.Program.Add(new ClassifyBlock { Region = "d", Field = "有效期", Templates = { "t" } });
+            return p;
+        }
         var dedupe = new List<string> { "名称" };
         string dir = Path.Combine(Path.GetTempPath(), "vb-recorder-selftest-" + Environment.ProcessId);
 
@@ -76,6 +82,32 @@ public static class RecorderSelfTest
             Console.WriteLine($"  [{(ok2 ? "通过" : "失败")}] 下一个新物品照常用这个序号存图并记下：{c}{(Exists(c) ? " 在" : " 不在")}");
             if (!ok1) fails++;
             if (!ok2) fails++;
+        }
+        // 2026-11-25：按「名称，有效期」去重，有效期来自「认图案」（总有值）。以前要去重字段全部读空才走兜底：
+        // 名称读空、角标一样的不同物品会拼成同一个键「|1天」被并掉
+        using (var r = new Recorder(Path.Combine(dir, "badge"), ProgBadge()))
+        {
+            var dd = new List<string> { "名称", "有效期" };
+            string last = "";
+            bool Row(string name, string badge, string stock, byte img)
+            {
+                r.Set("名称", name); r.Set("有效期", badge); r.Set("库存", stock); r.SetImage("图片", $"images/{r.NextRowNo:000}.png", Thumb(img));
+                bool rec = r.Record(dd, out last);
+                return rec;
+            }
+            Expect("同名「甲」1天", Row("甲", "1天", "17", 10), true);
+            Expect("同名「甲」3天（只差角标，图片缩略图也一样）", Row("甲", "3天", "17", 10), true);
+            Expect("同名「甲」没角标", Row("甲", "无", "5", 10), true);
+            Expect("同名「甲」1天再看到一次（真重复）", Row("甲", "1天", "17", 10), false);
+            bool msg = last.Contains("第 1 行");
+            Console.WriteLine($"  [{(msg ? "通过" : "失败")}] 跳过时说清和第几行一样：「{last}」");
+            if (!msg) fails++;
+            Expect("名称读空、1天、库存 17、图片 A", Row("", "1天", "17", 50), true);
+            Expect("名称读空、1天、库存 38、图片 B（另一件也是 1天）", Row("", "1天", "38", 200), true);
+            Expect("名称读空、3天、库存 17、图片 A（和第一件只差角标）", Row("", "3天", "17", 50), true);
+            Expect("名称读空、1天、库存 17、图片 A 再看到一次", Row("", "1天", "17", 50), false);
+            Console.WriteLine($"  按名称 + 有效期：记下 {r.Rows} 行，跳过 {r.Duplicates} 次，读空 {r.EmptyKeys} 次（期望 6 / 2 / 4）");
+            if (r.Rows != 6 || r.Duplicates != 2 || r.EmptyKeys != 4) fails++;
         }
         try { Directory.Delete(dir, true); } catch { }
         Console.WriteLine(fails == 0 ? "去重自测全部通过" : $"去重自测失败 {fails} 项");

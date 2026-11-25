@@ -48,6 +48,8 @@ public sealed class ProgramRunner : IDisposable
     private readonly Dictionary<string, DistanceDragger> _draggers = new();
 
     public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads;
+    /// <summary>认图案的次数、其中分不太开的、有点像但没过门槛的；读文字读空后重读的次数、重读读出字的次数（2026-11-25）。</summary>
+    public int Classifies, PatternClose, PatternMidway, Rereads, RereadHits;
     public int RowsRecorded => _rec?.Rows ?? 0;
     public int Duplicates => _rec?.Duplicates ?? 0;
     public int EmptyKeys => _rec?.EmptyKeys ?? 0;
@@ -81,7 +83,8 @@ public sealed class ProgramRunner : IDisposable
         finally
         {
             int released = _c.Input.ReleaseAll();
-            _c.Log.Write(new { ev = "runEnd", result, released, Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads, rows = RowsRecorded, dups = Duplicates, emptyKeys = EmptyKeys, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
+            _c.Log.Write(new { ev = "runEnd", result, released, Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads, rows = RowsRecorded, dups = Duplicates, emptyKeys = EmptyKeys,
+                Classifies, PatternClose, PatternMidway, Rereads, RereadHits, blocked = _c.Input.Guard.Blocked, t = BotLog.Now });
             _rec?.Dispose();
             try { Manifest?.Finish(status, RowsRecorded, Duplicates, EmptyKeys); }
             catch (Exception e) { _c.Log.Write(new { ev = "manifestFailed", error = e.Message, t = BotLog.Now }); }
@@ -249,7 +252,18 @@ public sealed class ProgramRunner : IDisposable
                 var roi = Region(rt.Region);
                 _ocr ??= new OcrReader();
                 var (raw, norm, ms) = await _ocr.ReadAsync(f, roi, ct);
-                string value = rt.NumbersOnly ? new string(norm.Where(char.IsAsciiDigit).ToArray()) : norm;
+                string Keep(string s) => rt.NumbersOnly ? new string(s.Where(char.IsAsciiDigit).ToArray()) : s;
+                string value = Keep(norm);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    // 读空时放大 4 倍、四周补 24 像素再读一次（2026-11-25：11-20 实测贴字框读空的 7 个名称，这样 7 个都读出字、5 个全对）
+                    var (raw2, norm2, ms2) = await _ocr.ReadAsync(f, roi, ct, RereadScale, RereadPad);
+                    string v2 = Keep(norm2);
+                    Rereads++;
+                    if (!string.IsNullOrWhiteSpace(v2)) { RereadHits++; raw = raw2; norm = norm2; value = v2; }
+                    ms += ms2;
+                    _c.Log.Write(new { ev = "reread", field = rt.Field, raw = raw2, value = v2, scale = RereadScale, pad = RereadPad, ms = Math.Round(ms2, 1), t = BotLog.Now });
+                }
                 Reads++;
                 _rec?.Set(rt.Field, value);
                 _c.Log.Write(new { ev = "read", field = rt.Field, raw, value, ms = Math.Round(ms, 1), seq = f.Seq, t = BotLog.Now });
@@ -276,6 +290,27 @@ public sealed class ProgramRunner : IDisposable
                 _c.Log.Write(new { ev = "saveImage", field = si.Field, file = rel, seq = f.Seq, t = BotLog.Now });
                 break;
             }
+            case ClassifyBlock cl:
+            {
+                var f = await CurrentFrame(ct);
+                var roi = Region(cl.Region);
+                var res = PatternClassifier.Classify(f, roi, cl.Templates.Select(n => (n, PatternClassifier.ValueOf(_c.Program, n), _templates[n])).ToList(), cl.Threshold, cl.NoneText);
+                _rec?.Set(cl.Field, res.Value);
+                Classifies++;
+                if (res.Close) PatternClose++;
+                if (res.Midway) PatternMidway++;
+                _c.Log.Write(new
+                {
+                    ev = "classify", field = cl.Field, value = res.Value, best = Math.Round(res.Best, 3), second = Math.Round(res.Second, 3),
+                    close = res.Close, byColor = res.ByColor, midway = res.Midway,
+                    scores = res.All.Select(c => new { tpl = c.Template, score = Math.Round(c.Score, 3), color = double.IsNaN(c.ColorDist) ? (double?)null : Math.Round(c.ColorDist, 1) }),
+                    seq = f.Seq, t = BotLog.Now
+                });
+                SetBox("roi:" + cl.Region, new OverlayBox(roi, $"{cl.Field}：{res.Value}", "region"));
+                if (res.Winner?.Box is { } wb) SetBox("match:classify", new OverlayBox(wb, $"{res.Winner.Value} {res.Winner.Score:0.00}", "match"));
+                Publish($"{cl.Field}：{res.Value}" + (res.Close ? $"（分不太开：{res.Best:0.00} / {res.Second:0.00}）" : res.Midway ? $"（有点像但没过门槛：最高 {res.Best:0.00}，可能是还没裁模板的新图案）" : ""));
+                break;
+            }
             case RecordRowBlock rr:
             {
                 if (_rec == null) throw new InvalidOperationException("没有输出目录，记录不了");
@@ -296,6 +331,10 @@ public sealed class ProgramRunner : IDisposable
     private (int, int) Near(int x, int y) => _c.Input.Humanizer?.PointNear(x, y) ?? (x, y);
 
     private static string Safe(string s) => string.Concat(s.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch));
+
+    /// <summary>读空后重读：放大几倍、四周补几像素（11-20 那批读空的名称上试出来的）。</summary>
+    public const double RereadScale = 4;
+    public const int RereadPad = 24;
 
     /// <summary>基准坐标 → 客户区像素（按宽度比例，和 NormFrame 一致）→ 屏幕物理像素。</summary>
     private bool ToScreen(int bx, int by, out int sx, out int sy)

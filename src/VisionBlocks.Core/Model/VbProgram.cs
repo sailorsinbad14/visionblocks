@@ -106,6 +106,7 @@ public sealed class ColorDef
 [JsonDerivedType(typeof(ReadTextBlock), "readText")]
 [JsonDerivedType(typeof(SaveImageBlock), "saveImage")]
 [JsonDerivedType(typeof(RecordRowBlock), "recordRow")]
+[JsonDerivedType(typeof(ClassifyBlock), "classify")]
 public abstract class Block
 {
     public string? Note { get; set; }
@@ -238,6 +239,20 @@ public sealed class SaveImageBlock : Block
 {
     public string Region { get; set; } = "";
     public string Field { get; set; } = "";
+}
+
+/// <summary>
+/// 认图案（2026-11-25）：在热区里把几张模板都找一遍，取分最高的那张，把它的名字（模板的标签，没有标签用模板名）写进字段；
+/// 都没过门槛写 NoneText。用来把图片角上的角标（有效期 1天 / 3天）变成一个能去重的文字字段。
+/// 只差一个数字的两张模板会互相拿到 0.8 多，所以不能「谁先过门槛算谁」，见 PatternClassifier。
+/// </summary>
+public sealed class ClassifyBlock : Block
+{
+    public string Region { get; set; } = "";
+    public List<string> Templates { get; set; } = new();
+    public string Field { get; set; } = "";
+    public double Threshold { get; set; } = 0.85;
+    public string NoneText { get; set; } = "无";
 }
 
 /// <summary>

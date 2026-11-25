@@ -35,7 +35,7 @@ public static class Program
                 "crop" => Snap.Crop(positional),
                 "color" => Snap.Color(positional),
                 "calib" => Snap.Calib(positional),
-                "ocr" => Snap.Ocr(positional),
+                "ocr" => Snap.Ocr(positional, opts),
                 "selftest-editor" => SelfTest.Editor(positional),
                 "shot" => SelfTest.Shot(opts),
                 "selftest-input" => InputSelfTest.Run(),
@@ -47,6 +47,7 @@ public static class Program
                 "selftest-wheelpx" => WheelPxSelfTest.Run(positional),
                 "selftest-dragpx" => DragPxSelfTest.Run(),
                 "selftest-keymap" => KeymapSelfTest.Run(),
+                "selftest-pattern" => PatternSelfTest.Run(positional),
                 "run" => RunProgram(positional.FirstOrDefault() ?? throw new ArgumentException("缺少程序文件路径"), opts),
                 _ => throw new ArgumentException("未知子命令 " + args[0])
             };
@@ -62,7 +63,7 @@ public static class Program
     internal static string SceneArgs(Dictionary<string, string> o)
     {
         string s = "";
-        foreach (var k in new[] { "scene", "open-item", "scroll-step", "drag-threshold", "drag-ratio" })
+        foreach (var k in new[] { "scene", "open-item", "open-cat", "scroll-step", "drag-threshold", "drag-ratio" })
             if (o.TryGetValue(k, out var v)) s += $" --{k} {v}";
         if (o.ContainsKey("drag-inertia")) s += " --drag-inertia";   // 背包的按住拖动（2026-11-23）：松手后惯性
         foreach (var k in new[] { "twins", "natural-end" })          // 背包的同名物品、真实到底位置（2026-11-25）
@@ -176,7 +177,9 @@ public static class Program
         if (estopped) runner.Manifest?.Finish("emergencyStop", runner.RowsRecorded, runner.Duplicates, runner.EmptyKeys);
         Console.WriteLine($"运行结束：{result}，用时 {sw.Elapsed.TotalSeconds:0.0}s；求值 {runner.Evaluations} 次，按键 {runner.Keys}，点击 {runner.Clicks}，拦截 {guard.Blocked}，点后确认失败 {runner.ConfirmFails}，等待超时 {runner.WaitTimeouts}"
             + (Recorder.FieldsOf(program).Count > 0 ? $"；滚轮 {runner.Wheels}，读文字 {runner.Reads}，记录 {runner.RowsRecorded} 行，重复跳过 {runner.Duplicates} 次" : "")
-                + (runner.EmptyKeys > 0 ? $"，去重字段读空 {runner.EmptyKeys} 次" : ""));
+                + (runner.EmptyKeys > 0 ? $"，去重字段读空 {runner.EmptyKeys} 次" : "")
+                + (runner.Rereads > 0 ? $"，读空后放大再读 {runner.Rereads} 次（读出 {runner.RereadHits}）" : "")
+                + (runner.Classifies > 0 ? $"，认图案 {runner.Classifies} 次（分不太开 {runner.PatternClose}，有点像但没过门槛 {runner.PatternMidway}）" : ""));
 
         overlay?.CloseFromAnyThread();
         source.Dispose();

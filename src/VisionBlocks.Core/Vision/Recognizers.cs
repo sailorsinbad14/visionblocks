@@ -15,6 +15,8 @@ public sealed class TemplateMatcher : IDisposable
     private readonly Mat _tmplGray;             // 基准分辨率下的灰度模板
     private readonly double _tmplStd;
     private readonly Dictionary<double, Mat> _scaled = new();
+    /// <summary>模板的平均颜色（B、G、R）；灰度模板没有颜色，为 null。</summary>
+    private readonly Scalar? _meanBgr;
 
     public TemplateMatcher(Mat templateBgrOrBgra)
     {
@@ -26,6 +28,21 @@ public sealed class TemplateMatcher : IDisposable
         };
         Cv2.MeanStdDev(_tmplGray, out _, out Scalar sd);
         _tmplStd = Math.Max(1e-6, sd.Val0);
+        if (templateBgrOrBgra.Channels() >= 3) _meanBgr = Cv2.Mean(templateBgrOrBgra);
+    }
+
+    /// <summary>
+    /// 匹配处（基准坐标）和模板的平均颜色差多少（B、G、R 三个差的平方和开方，0–441）。灰度模板返回 NaN。
+    /// 「认图案」在两张模板灰度分数差不多时用它分开只差底色的图案（2026-11-25）：灰度匹配不看颜色。
+    /// </summary>
+    public double ColorDistance(NormFrame f, RegionDef box)
+    {
+        if (_meanBgr is not Scalar t) return double.NaN;
+        var r = f.ToPixels(box);
+        if (r.Width <= 0 || r.Height <= 0) return double.NaN;
+        using var patch = new Mat(f.Bgr, r);
+        var m = Cv2.Mean(patch);
+        return Math.Sqrt(Math.Pow(m.Val0 - t.Val0, 2) + Math.Pow(m.Val1 - t.Val1, 2) + Math.Pow(m.Val2 - t.Val2, 2));
     }
 
     public static TemplateMatcher Load(string pngPath)
@@ -154,13 +171,19 @@ public sealed class OcrReader
                   ?? throw new InvalidOperationException("系统没有可用的 OCR 语言包");
     }
 
-    public async Task<(string Raw, string Normalized, double Ms)> ReadAsync(NormFrame f, RegionDef roi, CancellationToken ct = default)
+    /// <param name="scale">放大倍数；0 = 平时的做法（区域高不到 100 像素放大 2 倍，否则不放大）。</param>
+    /// <param name="padPx">放大以后四周补几像素的边（复制最外一圈的颜色），给贴着字的框留点白。</param>
+    public async Task<(string Raw, string Normalized, double Ms)> ReadAsync(NormFrame f, RegionDef roi, CancellationToken ct = default, double scale = 0, int padPx = 0)
     {
         long t0 = Stopwatch.GetTimestamp();
         var r = f.ToPixels(roi);
         using var area = new Mat(f.Bgr, r);
         // 字太小时放大到约 64px 高再识别
-        using var scaled = area.Height < 100 ? area.Resize(new Size(0, 0), 2, 2, InterpolationFlags.Cubic) : area.Clone();
+        double s = scale > 0 ? scale : area.Height < 100 ? 2 : 1;
+        // 指定了倍数（重读）时不超过 OCR 能收的最大边长，大热区放大 4 倍会超
+        if (scale > 0) s = Math.Max(1, Math.Min(s, (OcrEngine.MaxImageDimension - 2.0 * padPx) / Math.Max(area.Width, area.Height)));
+        using var resized = s != 1 ? area.Resize(new Size(0, 0), s, s, InterpolationFlags.Cubic) : area.Clone();
+        using var scaled = padPx > 0 ? resized.CopyMakeBorder(padPx, padPx, padPx, padPx, BorderTypes.Replicate) : resized.Clone();
         using var bgra = scaled.CvtColor(ColorConversionCodes.BGR2BGRA);
         var bytes = new byte[bgra.Width * bgra.Height * 4];
         System.Runtime.InteropServices.Marshal.Copy(bgra.Data, bytes, 0, bytes.Length);

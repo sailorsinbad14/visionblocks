@@ -144,7 +144,7 @@ public sealed partial class MainWindow
             RepeatUntilBlock => "重复直到…", RepeatBlock => "重复 N 次", IfBlock => "如果…", WaitUntilBlock => "等到…",
             WaitBlock => "等待", KeyBlock => "按键", ClickBlock => "点击", TypeTextBlock => "输入文字", StopBlock => "停止",
             ForEachCellBlock => "对每一格", UntilNoNewRowsBlock => "重复直到没有新记录", WheelBlock => "滚轮", DragBlock => "拖动",
-            ReadTextBlock => "读文字", SaveImageBlock => "截图存图", RecordRowBlock => "记录一行", _ => b.GetType().Name
+            ReadTextBlock => "读文字", SaveImageBlock => "截图存图", ClassifyBlock => "认图案", RecordRowBlock => "记录一行", _ => b.GetType().Name
         };
         PTitle(L.Z("积木 · ") + L.Z(kind), BlockText.CategoryOf(b) switch { BlockText.Category.Flow => Ui.FlowFg, BlockText.Category.Sense => Ui.SenseFg, _ => Ui.ActFg });
         switch (b)
@@ -296,6 +296,37 @@ public sealed partial class MainWindow
                 if (_ed.Program.Regions.ContainsKey(rt.Region)) _canvas.HighlightRegion = rt.Region;
                 break;
             }
+            case ClassifyBlock cl:
+            {
+                // 2026-11-25：把图片角上的角标（1天 / 3天）认成一个文字字段，「记录一行」按「名称，有效期」去重
+                Row("在哪个热区", Combo(RegionChoices(), cl.Region, s => cl.Region = s), "pClassRegion");
+                var tpls = new WrapPanel();
+                int ti = 0;
+                foreach (var (name, td) in _ed.Program.Templates)
+                {
+                    string label = string.IsNullOrWhiteSpace(td.Label) || td.Label == name ? name : $"{name}（写「{td.Label}」）";
+                    var ck = Check(label, cl.Templates.Contains(name), v => { if (v) { if (!cl.Templates.Contains(name)) cl.Templates.Add(name); } else cl.Templates.Remove(name); });
+                    ck.Margin = new Thickness(0, 2, 14, 2);
+                    AutomationProperties.SetAutomationId(ck, "pClassTpl" + ti++);
+                    tpls.Children.Add(ck);
+                }
+                Row("比哪些模板", tpls, "pClassTemplates");
+                if (_ed.Program.Templates.Count == 0) Note("还没有模板：先截一帧，用「裁模板」把每种角标各框一张（框紧一点，只框角标自己），名字就是认出来时写进字段的值，比如「1天」「3天」。");
+                Row("存进字段", Txt(cl.Field, s => cl.Field = s.Trim()), "pClassField");
+                Row("门槛", Num(cl.Threshold, v => cl.Threshold = v, 0.3, 1.0, "0.00"), "pClassThreshold");
+                Row("都不像时写", Txt(cl.NoneText, s => cl.NoneText = s), "pClassNone");
+                Note("把勾上的模板在热区里都找一遍，取分最高的那张，把它的名字写进字段；最高分也没过门槛就写「都不像时写」。热区框住角标那个角、比角标大一圈。");
+                Note("不能拿一层层「如果 看到图像」代替：只差一个数字的两张角标模板会互相拿到 0.86 左右，比 0.85 还高，先判的那张会抢走。分数差不多时会再比颜色（字一样、只差底色的角标靠它分开），还是分不开就照写第一名，运行信息里提醒「分不太开」。");
+                var result = Ui.Label("", 12);
+                AutomationProperties.SetAutomationId(result, "classifyResult");
+                var btn = Ui.Btn(L.Z("试一下（在冻结帧上）"), () => TryClassify(cl, result), "btnTryClassify", Ui.SenseFg, Brushes.White);
+                btn.HorizontalAlignment = HorizontalAlignment.Left;
+                btn.Margin = new Thickness(0, 6, 0, 2);
+                _props.Children.Add(btn);
+                _props.Children.Add(result);
+                if (_ed.Program.Regions.ContainsKey(cl.Region)) _canvas.HighlightRegion = cl.Region;
+                break;
+            }
             case SaveImageBlock si:
                 Row("截哪里", Combo(RegionChoices(), si.Region, s => si.Region = s), "pSaveRegion");
                 Row("存进字段", Txt(si.Field, s => si.Field = s.Trim()), "pField");
@@ -405,12 +436,44 @@ public sealed partial class MainWindow
         try
         {
             var (raw, norm, ms) = await _tester.ReadAsync(_frozen, roi);
-            string value = rt.NumbersOnly ? new string(norm.Where(char.IsAsciiDigit).ToArray()) : norm;
-            result.Text = $"{rt.Field} = 「{value}」（原文「{raw}」，{ms:0}ms）" + (rt.Region == VbProgram.CurrentCell ? "；用的是网格第一格" : "");
+            string Keep(string s) => rt.NumbersOnly ? new string(s.Where(char.IsAsciiDigit).ToArray()) : s;
+            string value = Keep(norm), again = "";
+            if (value.Length == 0)
+            {
+                // 和运行时一样：读空时放大再读一次
+                var (raw2, norm2, ms2) = await _tester.ReadAsync(_frozen, roi, VisionBlocks.Core.Runtime.ProgramRunner.RereadScale, VisionBlocks.Core.Runtime.ProgramRunner.RereadPad);
+                value = Keep(norm2);
+                raw = raw2;
+                ms += ms2;
+                again = value.Length > 0 ? "（第一次读空，放大再读读出来了；文字框最好再框大一圈）" : "（放大再读也是空的：文字框框大一圈、四周留白再试）";
+            }
+            result.Text = $"{rt.Field} = 「{value}」（原文「{raw}」，{ms:0}ms）{again}" + (rt.Region == VbProgram.CurrentCell ? "；用的是网格第一格" : "");
             result.Foreground = value.Length > 0 ? Ui.Ok : Ui.Bad;
             _canvas.TestRoi = roi;
             _canvas.InvalidateVisual();
             Log($"试读：{BlockText.Summary(rt, _ed.Program)} → 「{value}」");
+        }
+        catch (Exception e) { result.Text = "出错：" + e.Message; }
+    }
+
+    private void TryClassify(ClassifyBlock cl, TextBlock result)
+    {
+        if (_frozen == null) { result.Text = "先截一帧"; return; }
+        RegionDef? roi = cl.Region == VbProgram.CurrentCell ? CurrentCellFor(cl) : _ed.Program.Regions.GetValueOrDefault(cl.Region);
+        if (roi == null) { result.Text = cl.Region == VbProgram.CurrentCell ? "「当前格」要放在「对每一格」循环里才能试" : $"热区「{cl.Region}」不存在"; return; }
+        if (cl.Templates.Count == 0) { result.Text = "先勾上要比的模板"; return; }
+        try
+        {
+            var r = _tester.Classify(_ed.Program, _ed.Dir, cl, _frozen, roi);
+            string scores = string.Join(" · ", r.All.OrderByDescending(c => c.Score).Select(c => $"{c.Value} {c.Score:0.00}"));
+            string flag = r.Close ? "；分不太开，模板裁得再紧一点或者换一帧再试" : r.ByColor ? "；分数差不多，按颜色定的" : r.Midway ? "；有点像但没过门槛，可能是还没裁模板的新图案" : "";
+            result.Text = $"{cl.Field} = 「{r.Value}」（{scores}{flag}）";
+            result.Foreground = r.Close || r.Midway ? Ui.Bad : Ui.Ok;
+            _canvas.TestRoi = roi;
+            _canvas.TestBox = r.Winner?.Box;
+            _canvas.TestHit = r.Winner != null;
+            _canvas.InvalidateVisual();
+            Log($"试一下：{BlockText.Summary(cl, _ed.Program)} → 「{r.Value}」（{scores}）");
         }
         catch (Exception e) { result.Text = "出错：" + e.Message; }
     }

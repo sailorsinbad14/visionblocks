@@ -48,6 +48,7 @@ public static class Program
                 "selftest-dragpx" => DragPxSelfTest.Run(),
                 "selftest-keymap" => KeymapSelfTest.Run(),
                 "selftest-pattern" => PatternSelfTest.Run(positional),
+                "selftest-gridshift" => GridShiftSelfTest.Run(),
                 "run" => RunProgram(positional.FirstOrDefault() ?? throw new ArgumentException("缺少程序文件路径"), opts),
                 _ => throw new ArgumentException("未知子命令 " + args[0])
             };

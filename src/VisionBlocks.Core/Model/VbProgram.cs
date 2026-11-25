@@ -42,6 +42,45 @@ public sealed class GridDef
 
     /// <summary>第 i 格（先行后列，从 0 开始）的基准坐标。</summary>
     public RegionDef Cell(int i) => new() { X = X + i % Cols * (W + GapX), Y = Y + i / Cols * (H + GapY), W = W, H = H };
+
+    /// <summary>行距 = 格子高 + 行间距。</summary>
+    [JsonIgnore] public int Pitch => Math.Max(1, H + GapY);
+
+    /// <summary>整个网格占的范围（基准坐标）。</summary>
+    [JsonIgnore] public RegionDef Bounds => new() { X = X, Y = Y, W = Cols * (W + GapX) - GapX, H = Rows * (H + GapY) - GapY };
+
+    /// <summary>少走的距离（带方向，正 = 内容比预期低）按行距取余，落在 [0, 行距)。错开整行时格子照样压在行上，只看零头。</summary>
+    public double Phase(double shortfall) => ((shortfall % Pitch) + Pitch) % Pitch;
+
+    /// <summary>
+    /// 网格整体下移 phase 以后，完整露在 bounds 里的格子（2026-11-25，到底走不满）：从原第一行上面一行算到原最后一行下面一行，
+    /// 被 bounds 上下边切掉的行跳过（上一页读过，或者下一页才完整露出来），新完全露出来的行算进来。只看竖直方向；tol 像素以内的出界不算。
+    /// </summary>
+    public List<RegionDef> ShiftedCells(double phase, RegionDef bounds, double tol = 3)
+    {
+        var list = new List<RegionDef>();
+        for (int k = -1; k <= Rows; k++)
+        {
+            int y = (int)Math.Round(Y + phase + k * (double)Pitch);
+            if (y < bounds.Y - tol || y + H > bounds.Y + bounds.H + tol) continue;
+            for (int c = 0; c < Cols; c++) list.Add(new RegionDef { X = X + c * (W + GapX), Y = y, W = W, H = H });
+        }
+        return list;
+    }
+
+    /// <summary>和热区重叠面积最大的网格（编辑器的拖动 / 滚轮预览、运行时到底挪网格都用它认「这个热区滚的是哪个网格」）。</summary>
+    public static (string Name, GridDef Grid)? InRegion(VbProgram p, RegionDef roi)
+    {
+        (string, GridDef)? best = null;
+        long bestArea = 0;
+        foreach (var (name, g) in p.Grids)
+        {
+            var b = g.Bounds;
+            long w = Math.Min(b.X + b.W, roi.X + roi.W) - Math.Max(b.X, roi.X), h = Math.Min(b.Y + b.H, roi.Y + roi.H) - Math.Max(b.Y, roi.Y);
+            if (w > 0 && h > 0 && w * h > bestArea) { bestArea = w * h; best = (name, g); }
+        }
+        return best;
+    }
     public override string ToString() => $"{Cols}×{Rows} 格，每格 {W}×{H}，间距 {GapX}/{GapY}";
 }
 

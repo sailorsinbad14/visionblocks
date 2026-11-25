@@ -39,18 +39,8 @@ public static class CanvasMapper
 /// </summary>
 public static class WheelPreview
 {
-    public static (string Name, GridDef Grid)? GridIn(VbProgram p, RegionDef roi)
-    {
-        (string, GridDef)? best = null;
-        double bestArea = 0;
-        foreach (var (name, g) in p.Grids)
-        {
-            var gr = new Rect(g.X, g.Y, g.Cols * (g.W + g.GapX) - g.GapX, g.Rows * (g.H + g.GapY) - g.GapY);
-            gr.Intersect(new Rect(roi.X, roi.Y, roi.W, roi.H));
-            if (!gr.IsEmpty && gr.Width * gr.Height > bestArea) { bestArea = gr.Width * gr.Height; best = (name, g); }
-        }
-        return best;
-    }
+    /// <summary>和运行时到底挪网格认的是同一个（2026-11-25 挪进 Core）。</summary>
+    public static (string Name, GridDef Grid)? GridIn(VbProgram p, RegionDef roi) => GridDef.InRegion(p, roi);
 
     /// <summary>滚 d 像素是几行；dev = 离最近的整行差多少像素（正 = 多滚了）。</summary>
     public static (double Rows, int Dev, int Pitch) Align(GridDef g, int d)

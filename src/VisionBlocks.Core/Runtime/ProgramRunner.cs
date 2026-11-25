@@ -46,6 +46,11 @@ public sealed class ProgramRunner : IDisposable
     private Recorder? _rec;
     private readonly Dictionary<string, DistanceScroller> _scrollers = new();
     private readonly Dictionary<string, DistanceDragger> _draggers = new();
+    /// <summary>
+    /// 到底走不满（2026-11-25）：网格名 → 累计少走了多少（基准像素，正 = 内容比预期低）和拖 / 滚的是哪个热区。
+    /// 「对每一格」按它把网格下移「少走的距离按行距取余」；进入「重复直到没有新记录」时清零（换分类后列表回到顶）。
+    /// </summary>
+    private readonly Dictionary<string, (double Shortfall, string Region)> _gridShift = new();
 
     public int Evaluations, Keys, Clicks, ConfirmFails, WaitTimeouts, Wheels, Drags, Reads;
     /// <summary>认图案的次数、其中分不太开的、有点像但没过门槛的；读文字读空后重读的次数、重读读出字的次数（2026-11-25）。</summary>
@@ -169,13 +174,14 @@ public sealed class ProgramRunner : IDisposable
             case ForEachCellBlock fe:
             {
                 var g = _c.Program.Grids[fe.Grid];
+                var cells = CellsOf(fe.Grid, g, out double phase);
                 var outer = _cell;
                 try
                 {
-                    for (int i = 0; i < g.Cols * g.Rows; i++)
+                    for (int i = 0; i < cells.Count; i++)
                     {
-                        _cell = g.Cell(i);
-                        SetBox("cell", new OverlayBox(_cell, $"{Label(g.Label, fe.Grid)} 第 {i + 1} 格", "region"));
+                        _cell = cells[i];
+                        SetBox("cell", new OverlayBox(_cell, $"{Label(g.Label, fe.Grid)} 第 {i + 1} 格" + (phase > 0 ? $"（网格下移 {phase:0} px）" : ""), "region"));
                         await ExecList(fe.Body, ct);
                     }
                 }
@@ -184,6 +190,8 @@ public sealed class ProgramRunner : IDisposable
             }
             case UntilNoNewRowsBlock un:
             {
+                if (_gridShift.Count > 0) _c.Log.Write(new { ev = "gridShiftReset", grids = _gridShift.Keys.ToArray(), t = BotLog.Now });
+                _gridShift.Clear();   // 换了分类 / 列表，回到顶，网格回原位
                 int pass = 0;
                 while (true)
                 {
@@ -226,13 +234,14 @@ public sealed class ProgramRunner : IDisposable
                     end = res.End, reason = res.Reason, fails = res.MeasureFails, events = res.EventsSent,
                     carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), t = BotLog.Now
                 });
+                string shiftNote = NoteShortfall(wd.Region!, roi, dist + res.CarryIn, res.Moved, res.Reason);
                 Publish(res.Reason switch
                 {
                     "end" => $"滚轮：到底了，滚了 {res.Moved:0} / {dist} px",
                     "nearestNotch" => $"滚轮 {res.Moved:0} / {dist} px（这个程序只认整格）",
                     "cantMeasure" => "滚轮：量不出画面移动，停下",
                     _ => $"滚轮 {res.Moved:0} / {dist} px"
-                });
+                } + shiftNote);
                 break;
             }
             case WheelBlock wb:
@@ -538,6 +547,7 @@ public sealed class ProgramRunner : IDisposable
             gain = res.Gain is double g ? Math.Round(g, 3) : (double?)null, threshold = res.Threshold is double t ? Math.Round(t, 1) : (double?)null,
             end = res.End, reason = res.Reason, fails = res.MeasureFails, carryIn = Math.Round(res.CarryIn, 1), carryOut = Math.Round(res.CarryOut, 1), hold = res.HoldMs, t = BotLog.Now
         });
+        string shiftNote = NoteShortfall(db.Region, roi, dist + res.CarryIn, res.Moved, res.Reason);
         Publish(res.Reason switch
         {
             "end" => $"拖动：到底了，拖了 {res.Moved:0} / {dist} px",
@@ -545,7 +555,55 @@ public sealed class ProgramRunner : IDisposable
             "userMouse" => "拖动：鼠标被移动了，已松开并停下这一块",
             "blocked" => "拖动：输入被拦，已松开",
             _ => $"拖动 {res.Moved:0} / {dist} px"
-        } + (res.HoldMs > hold ? $"（松手后列表还在滑，松手前停顿已加长到 {res.HoldMs} ms）" : ""));
+        } + (res.HoldMs > hold ? $"（松手后列表还在滑，松手前停顿已加长到 {res.HoldMs} ms）" : "") + shiftNote);
+    }
+
+    /// <summary>
+    /// 拖动 / 按距离滚停下以后，把少走的距离记到这个热区里的网格上（2026-11-25）。返回一句附在运行信息后面的话。
+    /// 停在容差里的（done、只认整格、滚过头）零头已经带给下一块，不算；量不出的那一块走了多少不可信，不挪，只提醒。
+    /// 到底、被拦、动了鼠标、笔数用完：内容停在哪就是哪，少走的那段让网格跟上。
+    /// </summary>
+    private string NoteShortfall(string regionName, RegionDef roi, double target, double moved, string reason)
+    {
+        if (reason is "done" or "nearestNotch" or "overshoot") return "";
+        if (GridDef.InRegion(_c.Program, roi) is not { } found) return "";
+        var (gname, g) = found;
+        if (reason == "cantMeasure")
+        {
+            _c.Log.Write(new { ev = "gridShiftSkipped", grid = gname, region = regionName, reason, t = BotLog.Now });
+            return $"；量不出走了多少，网格「{Label(g.Label, gname)}」没挪，下一遍格子可能对不齐";
+        }
+        double sf = target - moved;
+        if (Math.Abs(sf) < 0.5) return "";
+        double total = _gridShift.GetValueOrDefault(gname).Shortfall + sf;
+        _gridShift[gname] = (total, regionName);
+        double phase = g.Phase(total);
+        _c.Log.Write(new { ev = "gridShift", grid = gname, region = regionName, reason, shortfall = Math.Round(sf, 1), total = Math.Round(total, 1), pitch = g.Pitch, phase = Math.Round(phase, 1), t = BotLog.Now });
+        return phase < 0.5 || phase > g.Pitch - 0.5
+            ? $"；少走 {sf:0} px 正好是整行，网格「{Label(g.Label, gname)}」不用挪"
+            : $"；少走 {sf:0} px，网格「{Label(g.Label, gname)}」下移 {phase:0} px 对齐";
+    }
+
+    /// <summary>「对每一格」这一次要走的格子：没少走过就是原来的格子；少走过就按取余下移，只留完整露在列表里的。</summary>
+    private List<RegionDef> CellsOf(string gname, GridDef g, out double phase)
+    {
+        phase = 0;
+        if (_gridShift.TryGetValue(gname, out var s))
+        {
+            double ph = g.Phase(s.Shortfall);
+            if (ph >= 0.5 && ph <= g.Pitch - 0.5)
+            {
+                phase = ph;
+                // 可见范围：网格原来的范围和拖动 / 滚轮热区合起来的外框
+                var gb = g.Bounds;
+                var rb = s.Region == VbProgram.CurrentCell || !_c.Program.Regions.TryGetValue(s.Region, out var r) ? gb : r;
+                int top = Math.Min(gb.Y, rb.Y), bottom = Math.Max(gb.Y + gb.H, rb.Y + rb.H);
+                var cells = g.ShiftedCells(ph, new RegionDef { X = gb.X, Y = top, W = gb.W, H = bottom - top });
+                _c.Log.Write(new { ev = "gridCells", grid = gname, phase = Math.Round(ph, 1), cells = cells.Count, t = BotLog.Now });
+                return cells;
+            }
+        }
+        return Enumerable.Range(0, g.Cols * g.Rows).Select(g.Cell).ToList();
     }
 
     /// <summary>基准坐标（可带小数）→ 屏幕物理像素。</summary>

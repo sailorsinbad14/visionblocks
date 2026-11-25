@@ -118,6 +118,12 @@ public static class PatternSelfTest
         var back = System.Text.Json.JsonSerializer.Deserialize<VbProgram>(json, ProgramIO.Options)!;
         Check("JSON 往返", back.Program.OfType<ClassifyBlock>().Single() is { Field: "有效期", Threshold: 0.85, NoneText: "无" } c2 && c2.Templates.SequenceEqual(new[] { "t1" }) && json.Contains("\"type\": \"classify\""));
 
+        foreach (var file in Directory.GetFiles(dir, "*.vbp.json"))
+        {
+            var errs = ProgramIO.Validate(ProgramIO.Load(file));
+            Check($"示例程序 {Path.GetFileName(file)} 没有错误", errs.Count == 0, string.Join("；", errs));
+        }
+
         Console.WriteLine(fails == 0 ? "认图案自测全部通过" : $"认图案自测失败 {fails} 项");
         return fails == 0 ? 0 : 1;
     }

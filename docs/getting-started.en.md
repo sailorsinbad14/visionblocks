@@ -25,11 +25,11 @@ This guide has two parts: first **run a sample in five minutes** against the bui
 | Top right | Hotkeys (by default <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> pause / resume, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> emergency stop; follows Settings if you change them), ⚙ Settings |
 | ① Target & window | Monitor, practice target (shown when enabled in Settings), **Bound window**, Refresh |
 | ② Capture | **Capture frame**, plus 7 canvas tools: Select, Draw region, Place point, Crop template, Pick color, Try OCR, Draw grid |
-| ③ Resources | Your regions, templates, colors and grids as cards with thumbnails; click one to edit it on the right |
+| ③ Resources | Your regions, templates, colors and grids as cards with thumbnails, grouped by kind (click a group header to fold it); click a card to edit it on the right. The chips filter by kind and the Find box searches names and labels |
 | Center top | Canvas: the frozen frame. Bottom left shows the mouse position in **base coordinates** (1920 wide, independent of window size and monitor) |
-| ④ Build blocks | Block shelf on the left, the program on the right; title bar buttons: Copy, Paste, Up, Down, Indent, Outdent, Delete. Blocks in the program can be dragged to a new place (a line shows where it will land, a dashed frame shows the Repeat / If it goes into; hold Ctrl when releasing to drop a copy), and the right-click menu has Copy, Cut, Paste, Duplicate, Delete. Up / Down step into and out of Repeat / If blocks, like an IDE's move-statement. Undo / Redo in the top bar cover every change (up to 50 steps). The bar above the program shows which scope the selected block is in (“Drop into: …” while dragging), and its Repeat / If turns dark orange; when you scroll down, outer Repeat / If blocks that scrolled out stay pinned at the top, and clicking one jumps back to it |
+| ④ Build blocks | Block shelf on the left, the program on the right; title bar buttons: Copy, Paste, Up, Down, Indent, Outdent, Delete. Blocks in the program can be dragged to a new place (a line shows where it will land, a dashed frame shows the Repeat / If it goes into; hold Ctrl when releasing to drop a copy), and the right-click menu has Copy, Cut, Paste, Duplicate, Delete. Up / Down step into and out of Repeat / If blocks, like an IDE's move-statement. Undo / Redo in the top bar cover every change (up to 50 steps). The bar above the program shows which scope the selected block is in (“Drop into: …” while dragging), and its Repeat / If turns dark orange; when you scroll down, outer Repeat / If blocks that scrolled out stay pinned at the top, and clicking one jumps back to it. Every Repeat / If / For each cell block and every Else row has a small triangle that folds it to its header plus “… N blocks inside” (runs are unaffected); the right-click menu and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> fold and unfold, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>[</kbd> / <kbd>]</kbd> fold or unfold everything. Folding is saved in the program file |
 | Right top | Properties of the selected block or resource; “Try it” tests a condition on the frozen frame |
-| Right bottom | Activity: hints and run log; “Open results” on its title bar |
+| Right bottom | Activity: hints and run log. Each entry has a small chip in its block colour (flow orange, sensing teal, action blue, note yellow, error red) and says in one sentence what was clicked, read, recorded or skipped and why; “Open results” on its title bar. Drag the gap between Properties and Activity to resize them |
 
 In a small window the editor switches to a compact layout where some buttons show only icons (hover for the name). Maximize the window while drawing regions; a larger canvas is more precise.
 
@@ -116,7 +116,7 @@ Select the blocks from top to bottom and change them in Properties (press Enter 
 | Second Read text | Read where = **物品名** (field 名称) |
 | Third Read text | Read where = **库存**; field **库存**; tick **Digits only** |
 | Save image | Capture where = **图片** |
-| Record row | Dedupe by fields = **名称** (without it every pass counts as new and the loop never ends) |
+| Record row | Dedupe by = **名称** (a new block picks the first text field; with “No dedupe” every pass counts as new and only “Stop at list end” ends the loop) |
 | Key | **Esc** |
 | Wait until | tick **Negate** (becomes “not seen”); Max wait 2000 |
 | Wheel | Scroll where = **region center: 物品区**; Notches **3** |
@@ -184,6 +184,31 @@ Some lists can be dragged with the mouse held down, which stops more precisely t
 
 Drag also carries the previous block's shortfall to the next one on the same region. The practice target's inventory can now be dragged: dragging starts after the mouse moves 10 px vertically, and an item opens only on a release without dragging. Launch options `--drag-threshold` (0 turns dragging off), `--drag-ratio` (list pixels per dragged pixel) and `--drag-inertia` (keeps sliding after release) imitate different programs.
 
+### 5.3 Same-name items that differ only by a corner badge: Match pattern
+
+Some items share a name and differ only by a badge on a corner of their picture (say an expiry of 1天 or 3天) and should be two rows. Deduping by name alone skips the second one as a duplicate. Putting a Save image field in the dedupe list does not work either, because it holds a file name that differs on every row (this is now rejected before the run). Instead:
+
+1. Capture a frame showing an item with the 1天 badge and use **Crop template** in ② to crop the badge **tightly** (the badge only, not the item art behind it); name it 1天. Do the same for 3天 and every other badge.
+2. Draw a region around that corner of the picture, a little larger than the badge. If the badge sits on the grid icon, use 当前格 (current cell).
+3. Add **Match pattern** from the shelf: region = that corner, tick the badge templates, field = 有效期. It tries every ticked template, **keeps the highest score** and writes that template's name into the field, or the value for “none match” (「无」 by default) when even the best score is under the threshold (0.85 by default). Use “Try it” on frozen frames of each badge to see the scores.
+4. Add 有效期 as a second dedupe field in Record row: a row is a duplicate only when both match. The result table also gains an 有效期 column.
+
+Why not a chain of “If image seen”: two badge templates that differ by one digit score about 0.86 on each other's badge (measured on the practice target), above the threshold, so whichever is checked first wins. When scores are close, Match pattern also compares mean colour (same text, different background); if it still cannot tell, it writes the top one and flags it in Activity. Near misses below the threshold are flagged too, usually a badge you have not cropped yet.
+
+When a name reads blank (most often a box too tight around the text), Read text retries once at 4x with padding. If it is still blank, Record row identifies the item by the other fields (badge included) and the saved picture.
+
+### 5.4 Drags that stop short at the end: the grid follows
+
+Real lists rarely end on a whole row: you ask for 720 px and the last drag moves only 330. The grid used to stay put and its cells straddled two rows. Now Drag and distance-mode Wheel record the shortfall, and the next For each cell shifts the grid that overlaps that region most by the shortfall modulo the row pitch, skips half-visible rows (already read on the previous page) and reads the newly revealed ones. The shift resets when Repeat until no new rows starts (a new category starts at the top). A block whose movement could not be measured does not shift and says so; notch-mode Wheel cannot measure and is not covered.
+
+Repeat until no new rows has **Stop at list end** ticked by default: when a Drag or distance Wheel in a pass reports the end without moving at all, the loop stops after that pass. That saves one all-duplicate pass and ends the loop even with dedupe off. A drag that moved partway before hitting the end does not count, because the next pass still has to read the revealed rows.
+
+The practice target's `--natural-end` makes lists end off-row like this, and `--twins` adds same-name items that differ only by a badge. Sample programs are in `programs\inv-twins`.
+
+### 5.5 When one condition is not enough: and / or
+
+Set the condition type of If, Wait until, Repeat until or a click's confirmation to **Several conditions**: choose “All must hold (and)” or “Any may hold (or)” and add ordinary conditions, each of which can be negated; the whole can be negated too. They are checked top to bottom and checking stops as soon as the result is known, so put slow text conditions last. There is one level only; nest If blocks for anything deeper.
+
 ## 6. Settings
 
 | Setting | What it does |
@@ -205,7 +230,9 @@ Each run's results folder holds `data.csv`, `images\` and `manifest.json`, and `
 
 - **“Read text” is always empty**: make sure Chinese (Simplified) is installed, widen the text region with blank space around it, and test with “Try OCR” in ② or “Try reading” in Properties.
 - **The pill stays red, “Input blocked”**: the target window is not in front. Don't touch the keyboard and mouse while running; pop-ups and notifications that take focus cause it too.
-- **Cells are cut off after scrolling, rows don't line up**: one notch in this software is not a whole row. Switch the Wheel block to scroll by distance, see [5.1](#51-rows-dont-line-up-after-scrolling-scroll-by-distance).
+- **Cells are cut off after scrolling, rows don't line up**: one notch in this software is not a whole row. Switch the Wheel block to scroll by distance, see [5.1](#51-rows-dont-line-up-after-scrolling-scroll-by-distance). If only the last page is off, the grid now follows by itself, see 5.4.
+- **Same-name items end up as one row**: they differ only by a badge on the picture. Turn the badge into a field with Match pattern and dedupe by it too, see 5.3.
+- **Activity says Match pattern could not tell**: usually a badge you have not cropped yet, so crop it and tick it; or the template was cropped loosely and includes the item art behind it.
 - **Hotkeys don't respond**: another program holds the pause or e-stop combination (by default <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> / <kbd>F12</kbd>); Activity says so. Use ■ Stop in the run capsule, or pick another combination under ⚙ Settings → Shortcuts….
 - **Portable build says the folder is not writable and data moved to Documents**: move the whole folder somewhere writable, such as the Desktop or drive D.
 - **The taskbar still shows an old icon**: Windows' icon cache; unpin and pin again.

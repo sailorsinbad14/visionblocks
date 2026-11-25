@@ -1,0 +1,264 @@
+{
+  "version": 1,
+  "name": "示例：同名物品角标 · 拖动翻页",
+  "base": {
+    "w": 1920,
+    "h": 1080
+  },
+  "target": {
+    "allowedProcesses": [
+      "BenchTarget"
+    ],
+    "closeImeBeforeKeys": true
+  },
+  "regions": {
+    "itemsView": {
+      "label": "物品区",
+      "x": 420,
+      "y": 150,
+      "w": 1440,
+      "h": 870
+    },
+    "titleZone": {
+      "label": "详情标题区",
+      "x": 600,
+      "y": 90,
+      "w": 220,
+      "h": 80
+    },
+    "nameZone": {
+      "label": "物品名",
+      "x": 1290,
+      "y": 500,
+      "w": 400,
+      "h": 64
+    },
+    "stockZone": {
+      "label": "库存",
+      "x": 1290,
+      "y": 580,
+      "w": 400,
+      "h": 56
+    },
+    "pictureZone": {
+      "label": "图片",
+      "x": 1322,
+      "y": 152,
+      "w": 336,
+      "h": 336
+    },
+    "chartZone": {
+      "label": "走势图",
+      "x": 222,
+      "y": 182,
+      "w": 1036,
+      "h": 786
+    },
+    "badgeZone": {
+      "label": "角标",
+      "x": 1540,
+      "y": 420,
+      "w": 125,
+      "h": 75
+    }
+  },
+  "points": {},
+  "templates": {
+    "detailTitle": {
+      "label": "详情页标题",
+      "file": "templates/detail-title.png"
+    },
+    "1天": {
+      "label": "1天",
+      "file": "templates/badge-1d.png"
+    },
+    "3天": {
+      "label": "3天",
+      "file": "templates/badge-3d.png"
+    },
+    "限时红": {
+      "label": "限时红",
+      "file": "templates/badge-limit-red.png"
+    },
+    "限时蓝": {
+      "label": "限时蓝",
+      "file": "templates/badge-limit-blue.png"
+    }
+  },
+  "colors": {
+    "border": {
+      "label": "格子边框",
+      "lower": [
+        0,
+        0,
+        185
+      ],
+      "upper": [
+        179,
+        50,
+        255
+      ]
+    }
+  },
+  "grids": {
+    "cats": {
+      "label": "分类",
+      "x": 70,
+      "y": 160,
+      "w": 280,
+      "h": 90,
+      "cols": 1,
+      "rows": 4,
+      "gapX": 0,
+      "gapY": 30
+    },
+    "items": {
+      "label": "物品格",
+      "x": 450,
+      "y": 170,
+      "w": 300,
+      "h": 200,
+      "cols": 4,
+      "rows": 3,
+      "gapX": 60,
+      "gapY": 40
+    }
+  },
+  "program": [
+    {
+      "type": "forEachCell",
+      "grid": "cats",
+      "body": [
+        {
+          "type": "click",
+          "region": "当前格",
+          "confirm": "none"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "readText",
+          "region": "当前格",
+          "field": "分类"
+        },
+        {
+          "type": "untilNoNewRows",
+          "maxTimes": 10,
+          "body": [
+            {
+              "type": "forEachCell",
+              "grid": "items",
+              "body": [
+                {
+                  "type": "if",
+                  "cond": {
+                    "type": "color",
+                    "color": "border",
+                    "region": "当前格",
+                    "op": ">",
+                    "ratio": 0.008
+                  },
+                  "body": [
+                    {
+                      "type": "click",
+                      "region": "当前格",
+                      "confirm": "condition",
+                      "confirmTimeoutMs": 2000,
+                      "confirmCond": {
+                        "type": "image",
+                        "template": "detailTitle",
+                        "region": "titleZone",
+                        "threshold": 0.9
+                      }
+                    },
+                    {
+                      "type": "if",
+                      "note": "点了但详情页没打开时什么都不做：不读、不记、也不按 Esc（Esc 在真游戏里可能把背包关掉）",
+                      "cond": {
+                        "type": "image",
+                        "template": "detailTitle",
+                        "region": "titleZone",
+                        "threshold": 0.9
+                      },
+                      "body": [
+                        {
+                          "type": "readText",
+                          "region": "nameZone",
+                          "field": "名称"
+                        },
+                        {
+                          "type": "readText",
+                          "region": "stockZone",
+                          "field": "库存",
+                          "numbersOnly": true
+                        },
+                        {
+                          "type": "saveImage",
+                          "region": "pictureZone",
+                          "field": "图片"
+                        },
+                        {
+                          "type": "saveImage",
+                          "region": "chartZone",
+                          "field": "走势图"
+                        },
+                        {
+                          "type": "classify",
+                          "region": "badgeZone",
+                          "templates": [
+                            "1天",
+                            "3天",
+                            "限时红",
+                            "限时蓝"
+                          ],
+                          "field": "有效期",
+                          "threshold": 0.85,
+                          "noneText": "无"
+                        },
+                        {
+                          "type": "recordRow",
+                          "dedupeBy": [
+                            "名称",
+                            "有效期"
+                          ]
+                        },
+                        {
+                          "type": "key",
+                          "key": "Esc"
+                        },
+                        {
+                          "type": "waitUntil",
+                          "timeoutMs": 2000,
+                          "cond": {
+                            "type": "image",
+                            "template": "detailTitle",
+                            "region": "titleZone",
+                            "threshold": 0.9,
+                            "negate": true
+                          }
+                        }
+                      ],
+                      "else": []
+                    }
+                  ],
+                  "else": []
+                }
+              ]
+            },
+            {
+              "type": "drag",
+              "region": "itemsView",
+              "distancePx": 720
+            },
+            {
+              "type": "wait",
+              "ms": 300
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

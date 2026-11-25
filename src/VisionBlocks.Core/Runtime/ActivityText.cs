@@ -19,13 +19,17 @@ public static class ActivityText
         public string Plain => Block + "  " + Text + (Sub != null ? "（" + Sub + "）" : "");
     }
 
-    /// <summary>会翻译的事件（编辑器按它先挑一遍，别的行不用解析）。runEnd 不在里面：编辑器自己写一句带统计的「运行结束」。</summary>
+    /// <summary>
+    /// 会翻译的事件（编辑器按它先挑一遍，别的行不用解析）。runEnd 不在里面：编辑器自己写一句带统计的「运行结束」。
+    /// cond 不在里面：每次图像 / 颜色判断都写一行，巡逻这类每帧判断的程序会刷满活动；只有文字条件另外放行（StudioRun.FilterLog）。
+    /// saveImage 不显示：每件物品一条，会把提醒挤出活动。
+    /// </summary>
     public static readonly HashSet<string> Events = new()
     {
         "runStart", "keydown", "clickConfirm", "wait", "blocked", "imeOff", "waitTimeout", "loopTimeout",
         "paused", "resumed", "emergencyStop", "noFrame", "frameBack", "sendFailed",
-        "row", "dup", "pass", "loopCap", "loopAtEnd", "read", "reread", "classify", "saveImage", "dragPx", "wheelPx",
-        "gridShift", "gridShiftSkipped", "cond"
+        "row", "dup", "pass", "loopCap", "loopAtEnd", "read", "reread", "classify", "dragPx", "wheelPx",
+        "gridShift", "gridShiftSkipped"
     };
 
     /// <summary>bot.jsonl 的一行 → 活动里的一条；不显示的返回 null。</summary>
@@ -37,7 +41,7 @@ public static class ActivityText
         {
             var e = doc.RootElement;
             string ev = S(e, "ev");
-            if (!Events.Contains(ev)) return null;
+            if (!Events.Contains(ev) && !(ev == "cond" && S(e, "kind") == "text")) return null;
             return ev switch
             {
                 "runStart" => new("flow", "开始运行", $"程序「{S(e, "program")}」"),
@@ -70,7 +74,6 @@ public static class ActivityText
                     ? new("sense", "读文字", $"{S(e, "field")} 第一次读空，放大再读：{S(e, "value")}", "文字框最好再框大一圈")
                     : new("warn", "读文字", $"{S(e, "field")} 读空，放大再读也是空的", "文字框框大一圈、四周留白再试"),
                 "classify" => Classify(e),
-                "saveImage" => new("sense", "截图存图", $"{S(e, "field")} → {S(e, "file")}"),
                 "dragPx" => Move(e, "拖动"),
                 "wheelPx" => Move(e, "滚轮"),
                 // 少走的正好是整行（取余接近 0 或接近行距）：网格其实没挪

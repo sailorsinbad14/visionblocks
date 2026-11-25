@@ -2197,10 +2197,16 @@ public sealed partial class MainWindow : Window
         var all = new StackPanel();
         all.Children.Add(new TextBlock { Text = time, FontSize = 10.5, Foreground = R("Text3"), FontFamily = new FontFamily("Consolas") });
         all.Children.Add(row);
-        var item = new ListBoxItem { Content = all };
+        var item = new ListBoxItem { Content = all, Tag = e.Kind };
         AutomationProperties.SetName(item, $"{time}  {e.Plain}");
         _log.Items.Add(item);
-        while (_log.Items.Count > 400) _log.Items.RemoveAt(0);
+        // 最多留 400 条：先删最早的普通条目，提醒和出错留着（运行总结会叫用户去活动里找「分不太开」这些提醒，不能被流水挤掉）
+        while (_log.Items.Count > 400)
+        {
+            int k = 0;
+            while (k < _log.Items.Count - 1 && _log.Items[k] is ListBoxItem { Tag: "warn" or "bad" }) k++;
+            _log.Items.RemoveAt(k == _log.Items.Count - 1 ? 0 : k);
+        }
         _log.ScrollIntoView(item);
     }
 

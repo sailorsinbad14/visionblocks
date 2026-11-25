@@ -48,6 +48,12 @@ public static class ActivitySelfTest
         Check("{\"ev\":\"cond\",\"kind\":\"text\",\"raw\":\"完成\",\"norm\":\"完成\",\"want\":\"完成\",\"hit\":true,\"t\":1}", "sense", "文字包含", "成立");
         Hidden("{\"ev\":\"cond\",\"kind\":\"image\",\"score\":0.9,\"hit\":true,\"t\":1}", "每次图像判断（太多，在 bot.jsonl 里）");
         Hidden("{\"ev\":\"frame\",\"seq\":5,\"t\":1}", "每一帧");
+        Hidden("{\"ev\":\"saveImage\",\"field\":\"图片\",\"file\":\"images/001.png\",\"t\":1}", "截图存图（每件一条，会把提醒挤出活动）");
+        {
+            bool ok = !ActivityText.Events.Contains("cond") && !ActivityText.Events.Contains("saveImage");
+            if (!ok) fails++;
+            Console.WriteLine($"  [{(ok ? "通过" : "失败")}] 编辑器先挑的事件里没有 cond、saveImage（每次图像 / 颜色判断、每张存图不送到界面；文字条件另外放行）");
+        }
         Hidden("{\"ev\":\"runEnd\",\"result\":\"完成\",\"rows\":46,\"t\":1}", "runEnd（编辑器自己写一句带统计的「运行结束」）");
         Hidden("{\"ev\":\"pass\"", "坏掉的 JSON");
         Console.WriteLine(fails == 0 ? "活动翻译自测全部通过" : $"活动翻译自测失败 {fails} 项");

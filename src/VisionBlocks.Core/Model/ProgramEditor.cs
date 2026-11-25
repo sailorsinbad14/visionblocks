@@ -315,7 +315,8 @@ public sealed class ProgramEditor
             "readText" => new ReadTextBlock { Region = region, Field = "名称" },
             "saveImage" => new SaveImageBlock { Region = region, Field = "图片" },
             "classify" => new ClassifyBlock { Region = region, Field = "有效期" },
-            "recordRow" => new RecordRowBlock(),
+            // 2026-11-25：默认按第一个文字字段（一般是「名称」）去重，截图字段不算；没有文字字段就不去重
+            "recordRow" => new RecordRowBlock { DedupeBy = Runtime.Recorder.FieldsOf(Program).Except(ProgramIO.ImageFields(Program.Program)).Take(1).ToList() },
             _ => throw new ArgumentException(type)
         };
     }

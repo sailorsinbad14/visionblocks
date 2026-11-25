@@ -336,14 +336,8 @@ public sealed partial class MainWindow
                 if (_ed.Program.Regions.ContainsKey(si.Region)) _canvas.HighlightRegion = si.Region;
                 break;
             case RecordRowBlock rr:
-            {
-                Row("按哪些字段去重", Txt(string.Join("，", rr.DedupeBy), s =>
-                    rr.DedupeBy = s.Split(new[] { ',', '，', '、', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()), "pDedupe");
-                var fields = VisionBlocks.Core.Runtime.Recorder.FieldsOf(_ed.Program);
-                Note("把各字段当前的值写成结果表（data.csv）的一行。列出的字段组合已经写过时跳过，不算新记录。现有字段：" + (fields.Count > 0 ? string.Join("、", fields) : "（还没有，先加「读文字」或「截图存图」）"));
-                Note("去重靠读出来的文字：同一画面每次读得一样，但两个名字只差一个容易认错的字时，可能被当成重复。");
+                DedupeProps(rr);
                 break;
-            }
         }
         Section("备注");
         Row("备注", Txt(b.Note ?? "", s => b.Note = string.IsNullOrWhiteSpace(s) ? null : s), "pNote");
@@ -456,6 +450,72 @@ public sealed partial class MainWindow
             Log($"试读：{BlockText.Summary(rt, _ed.Program)} → 「{value}」");
         }
         catch (Exception e) { result.Text = "出错：" + e.Message; }
+    }
+
+    /// <summary>
+    /// 「记录一行」的去重字段（2026-11-25 改成下拉框懒人版）：默认一栏，「＋ 加一个字段」再加一栏，栏和栏之间是「并且」，后加的栏能删。
+    /// 只能选文字字段（读文字、认图案）：截图字段比的是文件名（每行都不一样），灰着不能选；选过的不能再选。程序文件格式不变。
+    /// 旧程序里写了截图字段或者程序里没有的字段，那一栏照样显示、标红（运行前也会报错）。
+    /// </summary>
+    private void DedupeProps(RecordRowBlock rr)
+    {
+        var fields = VisionBlocks.Core.Runtime.Recorder.FieldsOf(_ed.Program);
+        var images = new HashSet<string>(ProgramIO.ImageFields(_ed.Program.Program));
+        var free = fields.Where(f => !images.Contains(f) && !rr.DedupeBy.Contains(f)).ToList();
+        void Apply() { Changed(); Dispatcher.BeginInvoke(ShowProps); }
+        var box = new StackPanel();
+        for (int i = 0; i < Math.Max(1, rr.DedupeBy.Count); i++)
+        {
+            int idx = i;
+            string cur = i < rr.DedupeBy.Count ? rr.DedupeBy[i] : "";
+            var cb = new ComboBox { MinWidth = 120 };
+            if (i == 0) cb.Items.Add(new ComboBoxItem { Content = L.Z("不去重"), Tag = "" });
+            foreach (var f in fields)
+            {
+                bool img = images.Contains(f), used = f != cur && rr.DedupeBy.Contains(f);
+                cb.Items.Add(new ComboBoxItem { Content = f + (img ? L.Z("（截图，不能去重）") : used ? L.Z("（已选）") : ""), Tag = f, IsEnabled = !img && !used });
+            }
+            bool bad = cur != "" && (images.Contains(cur) || !fields.Contains(cur));
+            if (cur != "" && !fields.Contains(cur)) cb.Items.Add(new ComboBoxItem { Content = cur + L.Z("（程序里没有这个字段）"), Tag = cur, IsEnabled = false });
+            cb.SelectedItem = cb.Items.Cast<ComboBoxItem>().FirstOrDefault(it => (string)it.Tag == cur);
+            if (bad) { cb.BorderBrush = Ui.Bad; cb.Foreground = Ui.Bad; cb.ToolTip = images.Contains(cur) ? L.Z("截图字段比的是文件名，每行都不一样，等于不去重；要按图片上的角标区分，用「认图案」") : L.Z("程序里没有「读文字」「认图案」写这个字段"); }
+            cb.SelectionChanged += (_, _) =>
+            {
+                if (cb.SelectedItem is not ComboBoxItem { Tag: string f } || f == cur) return;
+                if (f == "") rr.DedupeBy.Clear();
+                else if (idx < rr.DedupeBy.Count) rr.DedupeBy[idx] = f;
+                else rr.DedupeBy.Add(f);
+                Apply();
+            };
+            AutomationProperties.SetAutomationId(cb, "pDedupe" + i);
+            AutomationProperties.SetName(cb, L.Z("去重字段") + " " + (i + 1));
+            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 6), LastChildFill = true };
+            if (i > 0)
+            {
+                var and = new TextBlock { Text = L.Z("并且"), Foreground = Ui.Muted, FontSize = 12, Width = 34, VerticalAlignment = VerticalAlignment.Center };
+                DockPanel.SetDock(and, Dock.Left);
+                row.Children.Add(and);
+                var del = Ui.Btn("×", () => { rr.DedupeBy.RemoveAt(idx); Apply(); }, "btnDedupeDel" + i);
+                del.Margin = new Thickness(6, 0, 0, 0);
+                del.MinWidth = 30;
+                del.ToolTip = L.Z("删掉这一栏");
+                DockPanel.SetDock(del, Dock.Right);
+                row.Children.Add(del);
+            }
+            row.Children.Add(cb);
+            box.Children.Add(row);
+        }
+        Row("去重字段", box, "pDedupeBox");
+        var add = Ui.Btn(L.Z("＋ 加一个字段"), () => { rr.DedupeBy.Add(free[0]); Apply(); }, "btnDedupeAdd");
+        add.HorizontalAlignment = HorizontalAlignment.Left;
+        add.Margin = new Thickness(0, -4, 0, 10);
+        add.IsEnabled = rr.DedupeBy.Count > 0 && free.Count > 0;
+        _props.Children.Add(add);
+        Note(rr.DedupeBy.Count == 0
+            ? "不去重：每次执行都记一行。配合「重复直到没有新记录」翻页时，靠「拖到底也停」才会停。"
+            : $"「{string.Join("」「", rr.DedupeBy)}」{(rr.DedupeBy.Count > 1 ? "都" : "")}和写过的某一行一样，才算重复，跳过不记。有一个读空时改按其他字段和存的图片认。");
+        if (fields.Count == 0) Note("还没有字段：先加「读文字」「认图案」或「截图存图」。");
+        Note("把各字段当前的值写成结果表（data.csv）的一行。同名物品只差图片角上的角标时，用「认图案」把角标认成一个字段（比如「有效期」），再在这里加上它。");
     }
 
     private void TryClassify(ClassifyBlock cl, TextBlock result)

@@ -617,6 +617,8 @@ public sealed partial class MainWindow : Window
         {
             _treeDragStart = e.GetPosition(_tree);
             _treeDragBlock = ItemUnder(e.OriginalSource)?.Tag as Block;
+            // WPF 的树双击会切换展开 / 折叠：2026-11-25 加了折叠以后，双击积木会误折起来。只认小三角、右键菜单和快捷键
+            if (e.ClickCount >= 2 && ItemUnder(e.OriginalSource) is { Tag: IContainerBlock or ElseMarker }) e.Handled = true;
         };
         _tree.PreviewMouseMove += OnTreeMouseMove;
         _tree.PreviewMouseRightButtonDown += (_, e) => { if (ItemUnder(e.OriginalSource) is { } it) { it.IsSelected = true; it.Focus(); } };
@@ -1156,6 +1158,7 @@ public sealed partial class MainWindow : Window
         var nb = MakeBlock(type);
         if (nb == null) return;
         InsertBlock(nb, anchor);
+        if (nb is RecordRowBlock rr) { _ed.DefaultDedupe(rr); RefreshTreeText(); ShowProps(); }
         if (_ed.Program.Regions.Count == 0) Log("提示：还没有热区。先在画布上「拖框建热区」，再回来设置这块积木。");
     }
 
@@ -1439,6 +1442,7 @@ public sealed partial class MainWindow : Window
         {
             if (MakeBlock(type) is not { } nb) return;
             _ed.InsertAt(nb, d.List, d.Index);
+            if (nb is RecordRowBlock rr) _ed.DefaultDedupe(rr);
             _selected = nb;
         }
         else if (e.Data.GetData("vb-move") is Block b)

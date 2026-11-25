@@ -116,7 +116,7 @@ Select the blocks from top to bottom and change them in Properties (press Enter 
 | Second Read text | Read where = **物品名** (field 名称) |
 | Third Read text | Read where = **库存**; field **库存**; tick **Digits only** |
 | Save image | Capture where = **图片** |
-| Record row | Dedupe by = **名称** (a new block picks the first text field; with “No dedupe” every pass counts as new and only “Stop at list end” ends the loop) |
+| Record row | Dedupe by = **名称** (a new block picks the first field read above it at the same level, here 名称; with “No dedupe” every pass counts as new and only “Stop at list end” ends the loop) |
 | Key | **Esc** |
 | Wait until | tick **Negate** (becomes “not seen”); Max wait 2000 |
 | Wheel | Scroll where = **region center: 物品区**; Notches **3** |

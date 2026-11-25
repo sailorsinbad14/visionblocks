@@ -597,6 +597,8 @@ public sealed class ProgramRunner : IDisposable
     private string NoteShortfall(string regionName, RegionDef roi, double target, double moved, string reason)
     {
         if (reason is "done" or "nearestNotch" or "overshoot") return "";
+        // 内容一点没动（到底以后再拖、被拦在第一笔）：格子和行的相对位置没变，不挪。不然拖动距离不是整行时会把网格挪错
+        if (Math.Abs(moved) < 0.5) return "";
         if (GridDef.InRegion(_c.Program, roi) is not { } found) return "";
         var (gname, g) = found;
         if (reason == "cantMeasure")

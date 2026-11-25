@@ -70,8 +70,11 @@ public static class InventorySelfTest
         save.Region = pic;
         ed.Insert(save, opened, into: true);
         var rec = (RecordRowBlock)ed.CreateDefault("recordRow");
-        rec.DedupeBy = new() { "名称" };
         ed.Insert(rec, save);
+        // 2026-11-25：新放的「记录一行」默认按同一层里它上面第一个读出来的字段去重（这里是「名称」，不是外层先读的「分类」）
+        ed.DefaultDedupe(rec);
+        var defaultDedupe = string.Join("+", rec.DedupeBy);
+        rec.DedupeBy = new() { "名称" };
         ed.Insert(new KeyBlock { Key = "Esc" }, rec);
         ed.Insert(new WaitUntilBlock { TimeoutMs = 2000, Cond = new ImageCondition { Template = tpl, Region = title, Threshold = 0.9, Negate = true } }, opened, into: true);
         var wheel = (WheelBlock)ed.CreateDefault("wheel");
@@ -88,6 +91,7 @@ public static class InventorySelfTest
         int bad = 0;
         void Check(string label, bool ok, string detail) { if (!ok) bad++; Console.WriteLine($"  [{(ok ? "通过" : "不符")}] {label}：{detail}"); }
         Check("新建「对每一格」默认用第一个网格", defaultGridOk, catLoop.Grid);
+        Check("新放的「记录一行」默认按「名称」去重（同一层里它上面第一个读出来的字段，不是外层的「分类」）", defaultDedupe == "名称", defaultDedupe);
         var cell0 = ed.Program.Grids[cells].Cell(0);
         var r1 = tester.TestAsync(ed.Program, ed.Dir, notEmpty.Cond, gridF, cell0).GetAwaiter().GetResult();
         Check("网格页第一格不是空格子", r1.Hit, r1.Detail);

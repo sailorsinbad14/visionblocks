@@ -47,6 +47,20 @@ public sealed class ProgramEditor
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// 新放的「记录一行」默认按哪个字段去重（2026-11-25）：同一层里它上面第一个「读文字」「认图案」写的字段——背包示例里是「名称」
+    /// （按程序顺序取第一个会取到外层读的「分类」，结果每个分类只记一行）。这一层上面没读过字就不去重。
+    /// 放好以后调：改的是刚才那一步插入，不另占一步撤销。
+    /// </summary>
+    public void DefaultDedupe(RecordRowBlock rr)
+    {
+        if (Locate(rr) is not { } loc) return;
+        string? field = loc.List.Take(loc.Index).Select(b => b switch { ReadTextBlock r => r.Field, ClassifyBlock c => c.Field, _ => null })
+            .FirstOrDefault(f => !string.IsNullOrWhiteSpace(f));
+        rr.DedupeBy = field != null ? new List<string> { field } : new List<string>();
+        ViewChanged();
+    }
+
     /// <summary>b 所在的每一层容器（从外到里）；b 在「否则」分支里时那一层记 IsElse = true。折叠时用来一路展开到选中的积木。</summary>
     public List<(Block Owner, bool IsElse)> AncestorsOf(Block b)
     {
@@ -357,8 +371,7 @@ public sealed class ProgramEditor
             "readText" => new ReadTextBlock { Region = region, Field = "名称" },
             "saveImage" => new SaveImageBlock { Region = region, Field = "图片" },
             "classify" => new ClassifyBlock { Region = region, Field = "有效期" },
-            // 2026-11-25：默认按第一个文字字段（一般是「名称」）去重，截图字段不算；没有文字字段就不去重
-            "recordRow" => new RecordRowBlock { DedupeBy = Runtime.Recorder.FieldsOf(Program).Except(ProgramIO.ImageFields(Program.Program)).Take(1).ToList() },
+            "recordRow" => new RecordRowBlock(),   // 去重字段等放好位置再定，见 DefaultDedupe
             _ => throw new ArgumentException(type)
         };
     }

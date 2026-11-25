@@ -129,6 +129,23 @@ internal static class Ui
     public static TextBlock Label(string text, double size = 12, Brush? fg = null, FontWeight? weight = null) =>
         new() { Text = text, FontSize = size, Foreground = fg ?? (Brush)Theme["Ink"], FontWeight = weight ?? FontWeights.Normal, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2) };
 
+    /// <summary>
+    /// 2026-11-25：CenterOwner 只按主窗口居中，主窗口靠下时高的对话框底部会出屏幕（设置窗口实测底边 2328、桌面 2000）。
+    /// 按主窗口所在的屏幕（对话框刚建出来时还没放好位置，按它自己找会找到别的屏）限高，显示出来以后超出工作区就往上挪。
+    /// </summary>
+    private static void KeepOnScreen(Window w)
+    {
+        VisionBlocks.Core.Win32.Screens.Screen? Scr() => VisionBlocks.Core.Win32.Screens.OfWindow(new System.Windows.Interop.WindowInteropHelper(w.Owner ?? w).Handle);
+        w.SourceInitialized += (_, _) => { if (Scr() is { } scr) w.MaxHeight = scr.WorkDipH - 16; };
+        w.Loaded += (_, _) =>
+        {
+            if (Scr() is not { } scr) return;
+            double k = 96.0 / scr.Dpi, top = scr.Work.Y * k, bottom = (scr.Work.Y + scr.Work.H) * k;
+            if (w.Top + w.ActualHeight > bottom) w.Top = Math.Max(top, bottom - w.ActualHeight);
+            if (w.Top < top) w.Top = top;
+        };
+    }
+
     private static Window Dialog(Window owner, string title)
     {
         var w = new Window
@@ -152,6 +169,7 @@ internal static class Ui
     {
         var w = Dialog(owner, L.T("unsureTitle"));
         w.Topmost = true;
+        KeepOnScreen(w);
         AutomationProperties.SetAutomationId(w, "unsureDialog");
         bool done = false;
         System.Windows.Threading.DispatcherTimer? timer = null;
@@ -420,10 +438,13 @@ internal static class Ui
             urTimeout.IsChecked = true;
             AppSettings.Save();
         };
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        // 英文的后半句比中文长得多：单选和分钟框靠左，后半句占剩下的宽度、放不下就换行
+        var row = new DockPanel { Margin = new Thickness(0, 0, 0, 6), LastChildFill = true };
+        DockPanel.SetDock(urTimeout, Dock.Left);
+        DockPanel.SetDock(mins, Dock.Left);
         row.Children.Add(urTimeout);
         row.Children.Add(mins);
-        row.Children.Add(new TextBlock { Text = L.T("unsureTimeoutB"), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(new TextBlock { Text = L.T("unsureTimeoutB"), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
         um.Children.Add(row);
         um.Children.Add(UR("record", L.T("unsureRecord"), "unsureRecord"));
         sp.Children.Add(um);
@@ -478,7 +499,7 @@ internal static class Ui
         var root = new DockPanel();
         root.Children.Add(close);
         root.Children.Add(new ScrollViewer { Content = sp, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
-        w.MaxHeight = SystemParameters.WorkArea.Height - 16;
+        KeepOnScreen(w);
         w.Content = root;
         w.ShowDialog();
     }

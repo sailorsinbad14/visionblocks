@@ -111,6 +111,9 @@ public static class UnsureSelfTest
             var (ed, _) = NewProgram(false);
             var (res, r, lines, _) = Run(ed, (q, ct) => Task.FromResult<UnsureAnswer?>(new UnsureAnswer(null, Stop: true)));
             Check("结果是「在确认框里停止了运行」，一行没记，不算没人确认", res.Contains("确认框里停止") && r.RowsRecorded == 0 && r.UnsureUnanswered == 0 && Has(lines, "\"how\":\"stop\""), res);
+            string mf = Path.Combine(ed.Dir, "out", "manifest.json");
+            string status = File.Exists(mf) ? System.Text.Json.JsonDocument.Parse(File.ReadAllText(mf)).RootElement.GetProperty("run").GetProperty("status").GetString() ?? "" : "（没有 manifest.json）";
+            Check("manifest.json 里 run.status = stoppedByUser", status == "stoppedByUser" && !Has(lines, "manifestFailed"), status);
         }
 
         Console.WriteLine("4. 填新名字「7天」并存成模板：只问一次，以后自动认；「重复直到」的超时不算等用户的时间");

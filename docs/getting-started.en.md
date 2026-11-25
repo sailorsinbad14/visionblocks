@@ -201,7 +201,7 @@ Why not a chain of “If image seen”: two badge templates that differ by one d
 - None of them: type a new name under “None of these. Call it:” (say 7天). “Save the boxed image as a new template” is ticked by default; click “Use this name and continue”. The template is added to the program and ticked in this Match pattern block right away, so the same badge is recognized from then on without asking (the program now has unsaved changes; remember to save).
 - “Record 1天? for now and continue”: if you're not sure, record it with a question mark and look for those rows in the table later.
 - “Stop the run”: the run stops and the result status is `stoppedByUser`.
-- The dialog pops up from the background, so the keyboard usually stays on the target: click inside the dialog before typing (a yellow hint at the top says so).
+- If a yellow hint at the top says the keyboard is still on the target, click inside the dialog before typing: it pops up from the background during a run, and Windows sometimes doesn't give it the keyboard.
 
 If the same picture comes up again in the same run (Repeat until no new rows revisits items), your earlier answer is reused without asking. ⚙ Settings → “When a pattern is unclear” can change this to “wait N minutes, then record it for now and go on” or “don't ask; record it and keep going” (for unattended runs). Unanswered cases write the best guess plus a question mark (for example 1天?) or 未认出 (not recognized). These never collide with recognized values, so the item still gets its own row. vbrun behaves the same way (it never asks).
 

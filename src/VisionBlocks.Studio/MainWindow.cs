@@ -1589,7 +1589,8 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// 钉顶（像 VS Code 的 sticky scroll）：看树的可见区最上面那一行属于哪些容器，顶块已经滚出去的那些，
-    /// 按层级缩成一行钉在树顶（最多 5 层，再多写「外面还有 n 层」）。点一行就滚回那个容器并选中它。
+    /// 按层级缩成一行钉在树顶。最多 5 行；更外面的缩成一行路径「外面 n 层：A › B（否则）› C」（2026-11-25，以前只写「外面还有 n 层」、看不到名字），
+    /// 一个「如果」和它的否则不拆开。点一行（或路径里的一段）就滚回那个容器并选中它。
     /// </summary>
     private void UpdateSticky()
     {
@@ -1622,7 +1623,9 @@ public sealed partial class MainWindow : Window
         if (chain.Count > 0) chain = ChainAt(4 + Math.Min(chain.Count + 1, 6) * 20);
         if (chain.Count == 0) return;
         int skip = Math.Max(0, chain.Count - 5);
-        if (skip > 0) _sticky.Children.Add(StickyRow(null, string.Format(L.T("stickyMore"), skip), 0));
+        // 留下的第一行是「否则」时（它的「如果」被折掉了），把它也折进路径：一对如果 / 否则不拆开。行数只会更少，上面第二遍的遮挡估算照旧
+        if (skip > 0 && skip < chain.Count && chain[skip].Tag is ElseMarker) skip++;
+        if (skip > 0) _sticky.Children.Add(FoldedRow(chain.Take(skip).ToList()));
         for (int i = skip; i < chain.Count; i++)
         {
             var c = chain[i];
@@ -1638,6 +1641,35 @@ public sealed partial class MainWindow : Window
         for (var p = ItemsControl.ItemsControlFromItemContainer(it) as TreeViewItem; p != null; p = ItemsControl.ItemsControlFromItemContainer(p) as TreeViewItem)
             if (p.Tag is not ElseMarker) d++;
         return it.Tag is ElseMarker ? Math.Max(0, d - 1) : d;
+    }
+
+    /// <summary>
+    /// 折掉的外层缩成的一行：「外面 n 层：」+ 每层一段可以点的链接（段之间「 › 」），太长截断；全名放悬停提示和 HelpText（界面自动化测不了悬停）。
+    /// AutomationId 还是 stickyScope（ui.ps1 sticky 照样读得到），每段是一个 Hyperlink（UIA 里能 Invoke）。
+    /// </summary>
+    private UIElement FoldedRow(List<TreeViewItem> folded)
+    {
+        var chain = folded.Select(it => it.Tag switch { ElseMarker em => ((Block)em.Owner, true), Block b => (b, false), _ => ((Block?)null, false) })
+            .Where(x => x.Item1 != null).Select(x => (x.Item1!, x.Item2)).ToList();
+        var segs = _ed.FoldedSegments(chain, L.T("scopeElse"));
+        var tb = new TextBlock { Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+        tb.Inlines.Add(new System.Windows.Documents.Run(string.Format(L.T("stickyMore"), segs.Count)));
+        for (int k = 0; k < segs.Count; k++)
+        {
+            if (k > 0) tb.Inlines.Add(new System.Windows.Documents.Run(" › "));
+            var target = folded[segs[k].Index];
+            var link = new System.Windows.Documents.Hyperlink(new System.Windows.Documents.Run(segs[k].Text)) { Foreground = Brushes.White, TextDecorations = null, Cursor = Cursors.Hand, ToolTip = segs[k].Full };
+            AutomationProperties.SetName(link, segs[k].Text);
+            AutomationProperties.SetHelpText(link, segs[k].Full);
+            link.Click += (_, _) => { target.IsSelected = true; (HeaderOf(target) ?? target).BringIntoView(); };
+            tb.Inlines.Add(link);
+        }
+        string full = string.Join("\n", segs.Select(s => s.Full));
+        tb.ToolTip = full;
+        AutomationProperties.SetHelpText(tb, full);
+        AutomationProperties.SetAutomationId(tb, "stickyScope");
+        // 撑满一行，长了才会截断（左对齐的话宽度不受限，不会出省略号）
+        return new Border { Child = tb, Background = R("Text3"), CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 2, 10, 2), Margin = new Thickness(16, 2, 12, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
     }
 
     private UIElement StickyRow(TreeViewItem? target, string text, int depth)

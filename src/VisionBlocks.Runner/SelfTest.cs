@@ -252,6 +252,21 @@ internal static class SelfTest
         Check("否则分支里那块的外层：重复 → 如果（否则）", anc.Count == 2 && ReferenceEquals(anc[0].Owner, fout) && !anc[0].IsElse && ReferenceEquals(anc[1].Owner, fin) && anc[1].IsElse, string.Join(" › ", anc.Select(a => a.Owner.GetType().Name + (a.IsElse ? "（否则）" : ""))));
         Check("选中里面的积木：一路展开", fed.Reveal(fe) && !fout.Collapsed && !fin.ElseCollapsed && !fed.Reveal(fe), "");
         Check("运行不受影响：折着的程序照样通过校验", ProgramIO.Validate(back.Program).Count == 0, string.Join("；", ProgramIO.Validate(back.Program)));
+
+        // 钉顶超过 5 层时折掉的外层写成一行路径（2026-11-25）
+        Console.WriteLine("钉顶折叠路径：");
+        var longIf = new IfBlock { Cond = new TextCondition { Region = "区", Contains = "一段很长很长的文字" } };
+        var r9 = new RepeatBlock { Times = 9 };
+        var segs = fed.FoldedSegments(new List<(Block, bool)> { (fout, false), (longIf, false), (longIf, true), (r9, false) });
+        string Show(List<ProgramEditor.ScopeSegment> l) => string.Join(" › ", l.Select(x => $"{x.Text}@{x.Index}"));
+        Check("如果和它的否则并成一段、跳到否则那一行", segs.Count == 3 && segs[1].Text.EndsWith("…（否则）") && segs[1].Index == 2 && segs[1].Full == BlockText.Summary(longIf, fed.Program) + " › 否则", Show(segs));
+        Check("长摘要截到 14 个字（加省略号）", segs[1].Text.Length == 14 + "（否则）".Length && segs[0].Text == "重复 2 次" && segs[2].Text == "重复 9 次", Show(segs));
+        var lone = fed.FoldedSegments(new List<(Block, bool)> { (longIf, true), (r9, false) });
+        Check("单独的否则（它的如果不在这一串里）：写「否则」", lone.Count == 2 && lone[0].Text == "否则" && lone[0].Index == 0, Show(lone));
+        var twoIfs = fed.FoldedSegments(new List<(Block, bool)> { (fin, false), (longIf, true) });
+        Check("否则不是紧跟在它自己的如果后面：不并", twoIfs.Count == 2 && twoIfs[1].Text == "否则", Show(twoIfs));
+        var reps = fed.FoldedSegments(new List<(Block, bool)> { (fout, false), (r9, false) });
+        Check("不带否则的嵌套重复：一层一段", reps.Count == 2 && reps[1].Index == 1, Show(reps));
         try { Directory.Delete(other.Dir, true); Directory.Delete(ed.Dir, true); Directory.Delete(fed.Dir, true); } catch { }
         return fails;
     }

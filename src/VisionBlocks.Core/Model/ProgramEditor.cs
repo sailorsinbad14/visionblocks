@@ -571,6 +571,35 @@ public sealed class ProgramEditor
 
     public static string Short(string s, int maxLen) => s.Length <= maxLen ? s : s[..(maxLen - 1)] + "…";
 
+    /// <param name="Text">钉顶那一行上显示的（截短的）。</param>
+    /// <param name="Full">没截短的全名（悬停提示、界面自动化的 HelpText）。</param>
+    /// <param name="Index">这一段对应链里的第几项（点它跳到哪一行；「如果 …（否则）」跳到否则那一行）。</param>
+    public sealed record ScopeSegment(string Text, string Full, int Index);
+
+    /// <summary>
+    /// 钉顶超过 5 层时，折掉的外层写成一行路径（2026-11-25）。chain 是从外到里的一串作用域（容器，或者某个「如果」的否则分支）。
+    /// 每个容器一段，摘要截到 maxLen；紧跟在「如果」后面、属于它的否则并进前一段，写成「如果 …（否则）」；
+    /// 单独出现的否则（它的「如果」不在这一串里）写成「否则」。
+    /// </summary>
+    public List<ScopeSegment> FoldedSegments(IReadOnlyList<(Block Owner, bool IsElse)> chain, string elseLabel = "否则", int maxLen = 14)
+    {
+        var segs = new List<ScopeSegment>();
+        for (int i = 0; i < chain.Count; i++)
+        {
+            var (owner, isElse) = chain[i];
+            if (isElse)
+            {
+                if (i > 0 && segs.Count > 0 && ReferenceEquals(chain[i - 1].Owner, owner) && !chain[i - 1].IsElse)
+                    segs[^1] = segs[^1] with { Text = segs[^1].Text + "（" + elseLabel + "）", Full = segs[^1].Full + " › " + elseLabel, Index = i };
+                else segs.Add(new ScopeSegment(elseLabel, elseLabel, i));
+                continue;
+            }
+            string full = BlockText.Summary(owner, Program);
+            segs.Add(new ScopeSegment(Short(full, maxLen), full, i));
+        }
+        return segs;
+    }
+
     /// <summary>一块积木（连同里面的）用到的资源：(种类, 名字)。「当前格」不算。</summary>
     public static HashSet<(string Kind, string Name)> ResourcesUsedBy(Block root)
     {

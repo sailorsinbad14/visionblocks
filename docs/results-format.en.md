@@ -103,6 +103,7 @@ A `data-HHMMSS\` results folder exists only when the program uses a "Read text" 
 | `done` | the program finished | yes |
 | `stoppedByBlock` | reached a "Stop" block, a normal end | yes |
 | `cancelled` | the user clicked Stop, or the run's time limit was reached | partial |
+| `stoppedByUser` | the user clicked “Stop the run” in the unclear-pattern dialog | partial |
 | `emergencyStop` | the user pressed the e-stop hotkey (Ctrl+Alt+F12 by default) | partial |
 | `error` | the run stopped on an error | partial |
 

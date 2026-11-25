@@ -7,7 +7,7 @@ namespace VisionBlocks.Core.Runtime;
 
 /// <summary>
 /// 结果接口（别的程序要能照着说明正确读出表格和对应的图片）。规则见 docs\results-format.zh.md。
-/// 每次运行的结果目录里写 manifest.json：开始时 status = running，结束时改成 done / cancelled / emergencyStop / stoppedByBlock / error。
+/// 每次运行的结果目录里写 manifest.json：开始时 status = running，结束时改成 done / cancelled / emergencyStop / stoppedByBlock / stoppedByUser（认图案确认框里停止）/ error。
 /// 外部程序只读 status 不是 running 的结果。写文件先写临时文件再改名，读的一方不会读到半个 JSON。
 /// </summary>
 public sealed class ResultManifest

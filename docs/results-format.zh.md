@@ -103,6 +103,7 @@
 | `done` | 程序正常跑完 | 是 |
 | `stoppedByBlock` | 遇到「停止」积木，正常结束 | 是 |
 | `cancelled` | 用户点了「停止」，或运行时限到了 | 部分 |
+| `stoppedByUser` | 用户在「认图案分不开」确认框里点了「停止运行」 | 部分 |
 | `emergencyStop` | 用户按了急停热键（默认 Ctrl+Alt+F12） | 部分 |
 | `error` | 运行出错中断 | 部分 |
 

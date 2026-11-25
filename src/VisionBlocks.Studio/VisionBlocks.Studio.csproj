@@ -5,7 +5,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>VisionBlocksStudio</AssemblyName>
     <RootNamespace>VisionBlocks.Studio</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <!-- 应用图标和名字（图标「取景积木」，英文 VisionBlocks，中文 视搭）。
          exe 文件名保持 VisionBlocksStudio.exe（启动脚本、测试脚本、进程识别都按它）；任务管理器里显示的是 AssemblyTitle。
          窗口不单独设 Icon：WPF 默认沿用 exe 图标（实测 200% 缩放下标题栏 32、Alt+Tab 64 都取对应尺寸）。 -->

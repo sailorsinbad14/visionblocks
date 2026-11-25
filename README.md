@@ -28,8 +28,8 @@ Build “look at the screen → recognize → click or press → record” autom
 
 | 文件 | 适合 | 数据放在哪 |
 |---|---|---|
-| `VisionBlocks-0.3.0-win-x64-portable.zip` | 解压就能用，整个文件夹拷走数据就带走 | 解压出来的文件夹里的 `data\` |
-| `VisionBlocks-0.3.0-win-x64.exe` | 只要一个文件 | 程序和结果在「文档\VisionBlocks」，设置在 `%AppData%\VisionBlocks` |
+| `VisionBlocks-0.4.0-win-x64-portable.zip` | 解压就能用，整个文件夹拷走数据就带走 | 解压出来的文件夹里的 `data\` |
+| `VisionBlocks-0.4.0-win-x64.exe` | 只要一个文件 | 程序和结果在「文档\VisionBlocks」，设置在 `%AppData%\VisionBlocks` |
 
 都不用装 .NET。每个文件旁边有 `.sha256`，可以核对下载是否完整。
 
@@ -98,8 +98,8 @@ Get it from [Releases](https://github.com/sailorsinbad14/visionblocks/releases):
 
 | File | When to use | Where data goes |
 |---|---|---|
-| `VisionBlocks-0.3.0-win-x64-portable.zip` | Unzip and run; copy the folder to take your data along | `data\` inside the folder |
-| `VisionBlocks-0.3.0-win-x64.exe` | One file | Programs and results in Documents\VisionBlocks, settings in `%AppData%\VisionBlocks` |
+| `VisionBlocks-0.4.0-win-x64-portable.zip` | Unzip and run; copy the folder to take your data along | `data\` inside the folder |
+| `VisionBlocks-0.4.0-win-x64.exe` | One file | Programs and results in Documents\VisionBlocks, settings in `%AppData%\VisionBlocks` |
 
 No .NET install needed. Each file has a `.sha256` next to it.
 

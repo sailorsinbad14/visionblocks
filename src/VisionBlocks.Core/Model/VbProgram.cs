@@ -323,6 +323,7 @@ public sealed class RecordRowBlock : Block
 [JsonDerivedType(typeof(ImageCondition), "image")]
 [JsonDerivedType(typeof(ColorCondition), "color")]
 [JsonDerivedType(typeof(TextCondition), "text")]
+[JsonDerivedType(typeof(MultiCondition), "multi")]
 public abstract class Condition
 {
     /// <summary>取反：「看不到」「不包含」。</summary>
@@ -356,4 +357,15 @@ public sealed class TextCondition : Condition
 {
     public string Region { get; set; } = "";
     public string Contains { get; set; } = "";
+}
+
+/// <summary>
+/// 多个条件（2026-11-25）：Mode = "all" 全部满足（并且）/ "any" 任一满足（或者）。Items 是一串普通条件，各自可以取反，整体也可以取反（Negate）。
+/// 只有一层：Items 里不能再放「多个条件」，更复杂的用「如果」套「如果」。从上往下判断，前面已经能定结果就不再算后面的（慢的文字条件放最后）。
+/// </summary>
+public sealed class MultiCondition : Condition
+{
+    public string Mode { get; set; } = "all";
+    public List<Condition> Items { get; set; } = new();
+    [JsonIgnore] public bool Any => Mode == "any";
 }

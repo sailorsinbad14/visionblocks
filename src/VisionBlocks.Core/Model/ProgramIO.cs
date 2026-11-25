@@ -65,6 +65,15 @@ public static class ProgramIO
                     if (!RegionOk(tc.Region, inCell)) errs.Add($"{where}：{RegionErr(tc.Region, inCell)}");
                     if (string.IsNullOrWhiteSpace(tc.Contains)) errs.Add($"{where}：要匹配的文字为空");
                     break;
+                case MultiCondition mc:
+                    if (mc.Mode is not ("all" or "any")) errs.Add($"{where}：「多个条件」的组合方式只能是全部满足或任一满足");
+                    if (mc.Items.Count == 0) errs.Add($"{where}：「多个条件」里一个条件都没有");
+                    for (int k = 0; k < mc.Items.Count; k++)
+                    {
+                        if (mc.Items[k] is MultiCondition) errs.Add($"{where}（条件 {k + 1}）：「多个条件」里不能再套「多个条件」，用「如果」套「如果」");
+                        else Cond(mc.Items[k], $"{where}（条件 {k + 1}）", inCell);
+                    }
+                    break;
             }
         }
         void Walk(List<Block> blocks, string path, bool inCell)

@@ -64,6 +64,24 @@ public sealed class ConditionTester : IDisposable
                 detail = $"识别到「{norm}」（原文「{raw}」），用时 {ms:0.0}ms";
                 break;
             }
+            case MultiCondition mc:
+            {
+                // 「试一下」逐个显示每个条件的结果（和运行时一样，能定结果以后后面的不再算）
+                hit = !mc.Any;
+                var parts = new List<string>();
+                for (int k = 0; k < mc.Items.Count; k++)
+                {
+                    var r = await TestAsync(p, dir, mc.Items[k], f, currentCell);
+                    parts.Add($"条件 {k + 1} {r.Detail}");
+                    roi ??= r.Roi;
+                    box ??= r.Box;
+                    if (mc.Any && r.Hit) { hit = true; break; }
+                    if (!mc.Any && !r.Hit) { hit = false; break; }
+                }
+                if (parts.Count < mc.Items.Count) parts.Add($"后面 {mc.Items.Count - parts.Count} 个不用再看");
+                detail = string.Join("\n", parts);
+                break;
+            }
             default: return new Result(false, "不支持的条件", null, null);
         }
         if (c.Negate) hit = !hit;

@@ -343,46 +343,31 @@ public sealed partial class MainWindow
         Row("备注", Txt(b.Note ?? "", s => b.Note = string.IsNullOrWhiteSpace(s) ? null : s), "pNote");
     }
 
+    private static readonly string[] SimpleKinds = { "image", "color", "text" };
+    private static string KindName(string k) => L.Z(k switch { "color" => "颜色占比", "text" => "文字包含", "multi" => "多个条件（并且 / 或者）", _ => "看到图像" });
+    private static string KindOf(Condition? c) => c switch { ColorCondition => "color", TextCondition => "text", MultiCondition => "multi", _ => "image" };
+
     private void CondEditor(string title, Condition? c, Action<Condition> set)
     {
         Section(title);
-        var kinds = new[] { L.Z("看到图像"), L.Z("颜色占比"), L.Z("文字包含") };
-        string curKind = c switch { ColorCondition => kinds[1], TextCondition => kinds[2], _ => kinds[0] };
-        Row("条件类型", Combo(kinds, curKind, s =>
+        var kinds = SimpleKinds.Append("multi").Select(KindName).ToArray();
+        Row("条件类型", Combo(kinds, KindName(KindOf(c)), s =>
         {
-            var nc = MakeCondition(s == kinds[1] ? "color" : s == kinds[2] ? "text" : "image");
-            nc.Negate = c?.Negate ?? false;
+            string k = SimpleKinds.Append("multi").First(x => KindName(x) == s);
+            if (k == KindOf(c)) return;
+            // 换成「多个条件」时，原来那个条件留作第 1 个，再加一个空的第 2 个；换回普通条件时取第 1 个
+            Condition nc = k == "multi"
+                ? new MultiCondition { Items = { c is null or MultiCondition ? MakeCondition("image") : c, MakeCondition(c is ColorCondition ? "image" : "color") } }
+                : c is MultiCondition { Items.Count: > 0 } old && KindOf(old.Items[0]) == k ? old.Items[0] : MakeCondition(k);
+            if (k == "multi") nc.Negate = false;
+            else if (c is not MultiCondition) nc.Negate = c?.Negate ?? false;
             set(nc);
             Dispatcher.BeginInvoke(ShowProps);
         }), "pCondKind");
         if (c == null) return;
-        var regions = RegionChoices();
-        switch (c)
-        {
-            case ImageCondition i:
-                Row("模板", Combo(_ed.Program.Templates.Keys, i.Template, s => i.Template = s), "pTemplate");
-                Row("在哪个热区", Combo(regions, i.Region, s => i.Region = s), "pRegion");
-                Row("得分阈值", Num(i.Threshold, v => i.Threshold = v, 0.3, 1.0, "0.00"), "pThreshold");
-                Row("对比度下限", Num(i.MinContrast, v => i.MinContrast = v, 0, 5, "0.0"), "pMinContrast");
-                Note("灰度 TM_CCOEFF_NORMED 不看亮暗：半透明、变暗的同形干扰项也能拿高分，需要「对比度下限」挡住（实测：真 F 约 1.0，半透明 F 约 0.35）。阈值要拿含干扰项的帧试出来。");
-                if (_ed.Program.Regions.ContainsKey(i.Region)) _canvas.HighlightRegion = i.Region;
-                break;
-            case ColorCondition k:
-                Row("颜色", Combo(_ed.Program.Colors.Keys, k.Color, s => k.Color = s), "pColor");
-                Row("在哪个热区", Combo(regions, k.Region, s => k.Region = s), "pRegion");
-                Row("比较", Combo(new[] { ">", "<" }, k.Op, s => k.Op = s), "pOp");
-                Row("占比 %", Num(k.Ratio * 100, v => k.Ratio = v / 100, 0, 100, "0.0"), "pRatio");
-                Note("统计热区里落在这个颜色范围内的像素比例，比看单个像素稳。");
-                if (_ed.Program.Regions.ContainsKey(k.Region)) _canvas.HighlightRegion = k.Region;
-                break;
-            case TextCondition t:
-                Row("在哪个热区", Combo(regions, t.Region, s => t.Region = s), "pRegion");
-                Row("包含文字", Txt(t.Contains, s => t.Contains = s), "pContains");
-                Note("Windows 自带 OCR（zh-Hans）。比较前会去掉空格：它识别中文时常在字间插空格。");
-                if (_ed.Program.Regions.ContainsKey(t.Region)) _canvas.HighlightRegion = t.Region;
-                break;
-        }
-        Row("取反", Check(L.Z("看不到 / 不满足 / 不包含"), c.Negate, v => c.Negate = v), "pNegate");
+        if (c is MultiCondition mc) MultiEditor(mc);
+        else SimpleFields(c, "", true);
+        Row("取反", Check(L.Z(c is MultiCondition ? "整体取反：不满足上面的组合时才算成立" : "看不到 / 不满足 / 不包含"), c.Negate, v => c.Negate = v), "pNegate");
         var result = Ui.Label("", 12);
         AutomationProperties.SetAutomationId(result, "testResult");
         var btn = Ui.Btn(L.Z("试一下（在冻结帧上）"), () => TestCondition(c, result), "btnTest", Ui.SenseFg, Brushes.White);
@@ -390,6 +375,84 @@ public sealed partial class MainWindow
         btn.Margin = new Thickness(0, 6, 0, 2);
         _props.Children.Add(btn);
         _props.Children.Add(result);
+    }
+
+    /// <summary>普通条件的各项（图像 / 颜色 / 文字）。sfx 加在界面自动化 id 后面（「多个条件」里第 n 个条件用 n）。</summary>
+    private void SimpleFields(Condition c, string sfx, bool notes)
+    {
+        var regions = RegionChoices();
+        switch (c)
+        {
+            case ImageCondition i:
+                Row("模板", Combo(_ed.Program.Templates.Keys, i.Template, s => i.Template = s), "pTemplate" + sfx);
+                Row("在哪个热区", Combo(regions, i.Region, s => i.Region = s), "pRegion" + sfx);
+                Row("得分阈值", Num(i.Threshold, v => i.Threshold = v, 0.3, 1.0, "0.00"), "pThreshold" + sfx);
+                Row("对比度下限", Num(i.MinContrast, v => i.MinContrast = v, 0, 5, "0.0"), "pMinContrast" + sfx);
+                if (notes) Note("灰度 TM_CCOEFF_NORMED 不看亮暗：半透明、变暗的同形干扰项也能拿高分，需要「对比度下限」挡住（实测：真 F 约 1.0，半透明 F 约 0.35）。阈值要拿含干扰项的帧试出来。");
+                if (_ed.Program.Regions.ContainsKey(i.Region)) _canvas.HighlightRegion = i.Region;
+                break;
+            case ColorCondition k:
+                Row("颜色", Combo(_ed.Program.Colors.Keys, k.Color, s => k.Color = s), "pColor" + sfx);
+                Row("在哪个热区", Combo(regions, k.Region, s => k.Region = s), "pRegion" + sfx);
+                Row("比较", Combo(new[] { ">", "<" }, k.Op, s => k.Op = s), "pOp" + sfx);
+                Row("占比 %", Num(k.Ratio * 100, v => k.Ratio = v / 100, 0, 100, "0.0"), "pRatio" + sfx);
+                if (notes) Note("统计热区里落在这个颜色范围内的像素比例，比看单个像素稳。");
+                if (_ed.Program.Regions.ContainsKey(k.Region)) _canvas.HighlightRegion = k.Region;
+                break;
+            case TextCondition t:
+                Row("在哪个热区", Combo(regions, t.Region, s => t.Region = s), "pRegion" + sfx);
+                Row("包含文字", Txt(t.Contains, s => t.Contains = s), "pContains" + sfx);
+                if (notes) Note("Windows 自带 OCR（zh-Hans）。比较前会去掉空格：它识别中文时常在字间插空格。");
+                if (_ed.Program.Regions.ContainsKey(t.Region)) _canvas.HighlightRegion = t.Region;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 「多个条件」（2026-11-25）：怎么组合（全部满足 = 并且 / 任一满足 = 或者），下面一串普通条件，每个有自己的类型、各项、取反，能删；「＋ 加一个条件」。
+    /// 只有一层，不能再往里套。界面自动化 id：pCondMode、第 n 个条件 pCondKind{n} / pTemplate{n}… / pNegate{n} / btnCondDel{n}、btnCondAdd。
+    /// </summary>
+    private void MultiEditor(MultiCondition mc)
+    {
+        var modes = new[] { L.Z("全部满足（并且）"), L.Z("任一满足（或者）") };
+        Row("怎么组合", Combo(modes, modes[mc.Any ? 1 : 0], s => mc.Mode = s == modes[1] ? "any" : "all"), "pCondMode");
+        for (int i = 0; i < mc.Items.Count; i++)
+        {
+            int idx = i;
+            var sub = mc.Items[i];
+            string n = (i + 1).ToString(CultureInfo.InvariantCulture);
+            var box = new StackPanel();
+            var head = new DockPanel { Margin = new Thickness(0, 4, 0, 6) };
+            if (mc.Items.Count > 1)
+            {
+                var del = Ui.Btn("×", () => { mc.Items.RemoveAt(idx); Changed(); Dispatcher.BeginInvoke(ShowProps); }, "btnCondDel" + n);
+                del.MinWidth = 30;
+                del.ToolTip = L.Z("删掉这个条件");
+                DockPanel.SetDock(del, Dock.Right);
+                head.Children.Add(del);
+            }
+            head.Children.Add(new TextBlock { Text = (L.En ? "Condition " : "条件 ") + n + (idx > 0 ? (mc.Any ? L.Z("（或者）") : L.Z("（并且）")) : ""), FontWeight = FontWeights.SemiBold, FontSize = 12.5, Foreground = Ui.SenseFg, VerticalAlignment = VerticalAlignment.Center });
+            _props.Children.Add(head);
+            Row("条件类型", Combo(SimpleKinds.Select(KindName), KindName(KindOf(sub)), s =>
+            {
+                string k = SimpleKinds.First(x => KindName(x) == s);
+                if (k == KindOf(sub)) return;
+                var nc = MakeCondition(k);
+                nc.Negate = sub.Negate;
+                mc.Items[idx] = nc;
+                Dispatcher.BeginInvoke(ShowProps);
+            }), "pCondKind" + n);
+            SimpleFields(sub, n, false);
+            Row("取反", Check(L.Z("看不到 / 不满足 / 不包含"), sub.Negate, v => sub.Negate = v), "pNegate" + n);
+        }
+        var add = Ui.Btn(L.Z("＋ 加一个条件"), () => { mc.Items.Add(MakeCondition("image")); Changed(); Dispatcher.BeginInvoke(ShowProps); }, "btnCondAdd");
+        add.HorizontalAlignment = HorizontalAlignment.Left;
+        add.Margin = new Thickness(0, 0, 0, 10);
+        _props.Children.Add(add);
+        Note(mc.Any
+            ? "从上往下看，有一个满足就算成立，后面的不再看。"
+            : "从上往下看，每一个都满足才算成立；遇到一个不满足就停，后面的不再看。慢的「文字包含」放最后能省时间。");
+        Note("只能一层：要「并且里再套或者」，用「如果」套「如果」。");
     }
 
     private async void TestCondition(Condition c, TextBlock result)

@@ -242,16 +242,17 @@ public sealed class ProgramEditor
     public List<string> UsesOf(string kind, string name)
     {
         var uses = new List<string>();
+        bool Uses(Condition? c) => c switch
+        {
+            ImageCondition i => (kind == "region" && i.Region == name) || (kind == "template" && i.Template == name),
+            ColorCondition k => (kind == "region" && k.Region == name) || (kind == "color" && k.Color == name),
+            TextCondition t => kind == "region" && t.Region == name,
+            MultiCondition m => m.Items.Any(Uses),
+            _ => false
+        };
         void C(Condition? c, Block b)
         {
-            bool used = c switch
-            {
-                ImageCondition i => (kind == "region" && i.Region == name) || (kind == "template" && i.Template == name),
-                ColorCondition k => (kind == "region" && k.Region == name) || (kind == "color" && k.Color == name),
-                TextCondition t => kind == "region" && t.Region == name,
-                _ => false
-            };
-            if (used) uses.Add(BlockText.Summary(b, Program));
+            if (Uses(c)) uses.Add(BlockText.Summary(b, Program));
         }
         foreach (var b in All())
         {
@@ -271,6 +272,7 @@ public sealed class ProgramEditor
                 case ReadTextBlock rt when kind == "region" && rt.Region == name:
                 case SaveImageBlock si when kind == "region" && si.Region == name:
                 case ForEachCellBlock fe when kind == "grid" && fe.Grid == name:
+                case ClassifyBlock cl when (kind == "region" && cl.Region == name) || (kind == "template" && cl.Templates.Contains(name)):
                     uses.Add(BlockText.Summary(b, Program));
                     break;
             }
@@ -568,6 +570,7 @@ public sealed class ProgramEditor
                 case ImageCondition i: R(i.Region); if (!string.IsNullOrEmpty(i.Template)) set.Add(("template", i.Template)); break;
                 case ColorCondition k: R(k.Region); if (!string.IsNullOrEmpty(k.Color)) set.Add(("color", k.Color)); break;
                 case TextCondition t: R(t.Region); break;
+                case MultiCondition m: foreach (var x in m.Items) C(x); break;
             }
         }
         void B(Block b)
@@ -582,6 +585,7 @@ public sealed class ProgramEditor
                 case DragBlock db: R(db.Region); break;
                 case ReadTextBlock rt: R(rt.Region); break;
                 case SaveImageBlock si: R(si.Region); break;
+                case ClassifyBlock cl: R(cl.Region); foreach (var t in cl.Templates) if (!string.IsNullOrEmpty(t)) set.Add(("template", t)); break;
                 case ForEachCellBlock fe: if (!string.IsNullOrEmpty(fe.Grid)) set.Add(("grid", fe.Grid)); break;
             }
             if (b is IContainerBlock c) foreach (var x in c.Body) B(x);

@@ -453,6 +453,22 @@ public sealed class ProgramRunner : IDisposable
                 SetBox("roi:" + tc.Region, new OverlayBox(roi, $"OCR：{norm}", "region"));
                 break;
             }
+            case MultiCondition mc:
+            {
+                // 从上往下判断：全部满足遇到一个不满足就停，任一满足遇到一个满足就停（后面的不再截图识别，慢的文字条件放最后能省时间）
+                hit = !mc.Any;
+                var parts = new List<string>();
+                foreach (var sub in mc.Items)
+                {
+                    var r = await Eval(sub, ct);
+                    parts.Add((r.Hit ? "✓ " : "✗ ") + r.Detail);
+                    if (mc.Any && r.Hit) { hit = true; break; }
+                    if (!mc.Any && !r.Hit) { hit = false; break; }
+                }
+                detail = string.Join(mc.Any ? " 或者 " : " 并且 ", parts);
+                _c.Log.Write(new { ev = "cond", kind = "multi", mode = mc.Mode, hit, checkedItems = parts.Count, items = mc.Items.Count, t = BotLog.Now });
+                break;
+            }
             default: throw new NotSupportedException(cond.GetType().Name);
         }
         if (cond.Negate) hit = !hit;

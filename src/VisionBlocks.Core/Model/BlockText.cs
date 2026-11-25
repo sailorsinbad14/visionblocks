@@ -26,6 +26,7 @@ public static class BlockText
         ImageCondition i => $"{(i.Negate ? "看不到" : "看到")}图像「{LT(p, i.Template)}」在「{L(p.Regions, i.Region)}」≥ {i.Threshold:0.00}" + (i.MinContrast > 0 ? $"（对比度 ≥ {i.MinContrast:0.0}）" : ""),
         ColorCondition k => $"「{L(p.Regions, k.Region)}」里「{LC(p, k.Color)}」占比 {(k.Negate ? "不" : "")}{k.Op} {k.Ratio * 100:0.#}%",
         TextCondition t => $"「{L(p.Regions, t.Region)}」文字{(t.Negate ? "不" : "")}包含「{t.Contains}」",
+        MultiCondition m => (m.Negate ? "不满足（" : "（") + (m.Items.Count == 0 ? "还没有条件" : string.Join(m.Any ? " 或者 " : " 并且 ", m.Items.Select(x => Cond(x, p)))) + "）",
         _ => c.GetType().Name
     };
 

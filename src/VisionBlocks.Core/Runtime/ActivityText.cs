@@ -73,7 +73,10 @@ public static class ActivityText
                 "saveImage" => new("sense", "截图存图", $"{S(e, "field")} → {S(e, "file")}"),
                 "dragPx" => Move(e, "拖动"),
                 "wheelPx" => Move(e, "滚轮"),
-                "gridShift" => new("act", "网格", $"「{S(e, "grid")}」下移 {D(e, "phase"):0} px 对齐", $"少走了 {D(e, "shortfall"):0} px，行距 {N(e, "pitch")}"),
+                // 少走的正好是整行（取余接近 0 或接近行距）：网格其实没挪
+                "gridShift" => D(e, "phase") < 0.5 || D(e, "phase") > N(e, "pitch") - 0.5
+                    ? new("act", "网格", $"「{S(e, "grid")}」不用挪：少走的 {D(e, "shortfall"):0} px 正好是整行")
+                    : new("act", "网格", $"「{S(e, "grid")}」下移 {D(e, "phase"):0} px 对齐", $"少走了 {D(e, "shortfall"):0} px，行距 {N(e, "pitch")}"),
                 "gridShiftSkipped" => new("warn", "网格", $"「{S(e, "grid")}」没挪：量不出走了多少", "下一遍格子可能对不齐"),
                 "cond" when S(e, "kind") == "text" => new("sense", "文字包含", $"读到「{S(e, "norm")}」", B(e, "hit") ? "成立" : "不成立"),
                 _ => null

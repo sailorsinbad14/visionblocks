@@ -42,6 +42,7 @@ public static class ActivitySelfTest
         Check("{\"ev\":\"dragPx\",\"want\":720,\"got\":330.4,\"strokes\":3,\"end\":true,\"reason\":\"end\",\"t\":1}", "act", "拖动", "只走了 330 / 720 px");
         Check("{\"ev\":\"wheelPx\",\"want\":240,\"got\":0,\"reason\":\"cantMeasure\",\"t\":1}", "warn", "滚轮", "量不出");
         Check("{\"ev\":\"gridShift\",\"grid\":\"items\",\"region\":\"itemsView\",\"reason\":\"end\",\"shortfall\":390,\"total\":390,\"pitch\":240,\"phase\":150,\"t\":1}", "act", "网格", "下移 150 px");
+        Check("{\"ev\":\"gridShift\",\"grid\":\"items\",\"reason\":\"end\",\"shortfall\":480,\"total\":480,\"pitch\":240,\"phase\":0,\"t\":1}", "act", "网格", "不用挪");
         Check("{\"ev\":\"blocked\",\"what\":\"keydown Esc\",\"why\":\"前台不是靶子\",\"t\":1}", "bad", "拦下", "前台不是靶子");
         Check("{\"ev\":\"emergencyStop\",\"t\":1}", "bad", "急停", "急停");
         Check("{\"ev\":\"cond\",\"kind\":\"text\",\"raw\":\"完成\",\"norm\":\"完成\",\"want\":\"完成\",\"hit\":true,\"t\":1}", "sense", "文字包含", "成立");
